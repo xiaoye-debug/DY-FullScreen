@@ -249,32 +249,34 @@ static UIWindow *DYFSActiveWindow(void) {
 }
 %end
 
-@interface AWEFeedTableView : UIView
+@interface AWEFeedDataSafeTableView : UITableView
 @end
 
-%hook AWEFeedTableView
-- (void)layoutSubviews {
-    %orig;
-    UIView *superview = self.superview;
-    if (!superview) return;
-
-    // 关键修复：作品主页不要强改 FeedTable 高度。
-    if (DYFSIsAuthorProfileContext(self)) return;
-
-    BOOL applied = [objc_getAssociatedObject(self, &kDYFSFeedTableAppliedKey) boolValue];
-    CGFloat superH = superview.bounds.size.height;
-
-    if (!applied) {
-        CGFloat gap = MAX(superH - self.bounds.size.height, 0.0);
-        objc_setAssociatedObject(self, &kDYFSFeedTableOriginalGapKey, @(gap), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-        objc_setAssociatedObject(self, &kDYFSFeedTableAppliedKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+%hook AWEFeedDataSafeTableView
+- (void)setFrame:(CGRect)frame {
+    if (!DYFSIsEnabled()) {
+        %orig(frame);
+        return;
     }
 
-    if (fabs(self.bounds.size.height - superH) > 0.5) {
-        CGRect f = self.frame;
-        f.size.height = superH;
-        self.frame = f;
+    UIView *parent = self.superview;
+    CGFloat target = parent ? parent.bounds.size.height : 0.0;
+    CGFloat current = frame.size.height;
+
+    // 只处理“容器明显比表高、但表至少已有一半高度”的稳定布局阶段。
+    // 这是 DYKiller 的实际判定方式，避免布局早期半成品尺寸导致跳动。
+    if (target <= 0.0 || current >= target - 0.5 || current < target * 0.5) {
+        %orig(frame);
+        return;
     }
+
+    if (!objc_getAssociatedObject(self, &kDYFSFeedTableOriginalGapKey)) {
+        objc_setAssociatedObject(self, &kDYFSFeedTableOriginalGapKey,
+                                 @(target - current), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    frame.size.height = target;
+    %orig(frame);
 }
 %end
 
@@ -354,28 +356,58 @@ static UIWindow *DYFSActiveWindow(void) {
 
 #pragma mark - Home live title / status label
 
-@interface AWELiveFeedStatusLabel : UIView @end
-%hook AWELiveFeedStatusLabel
+#pragma mark - Live preview chrome
+
+@interface AWELivePreStream4LayerContainerView : UIView
+@property(nonatomic,strong) UIImageView *bottomDarkWatermark;
+@property(nonatomic,strong) UIView *controlContainer;
+@end
+
+static BOOL DYFSIsLivePreviewController(UIView *view) {
+    UIViewController *vc = DYFSFirstViewControllerFromView(view);
+    if (!vc) return NO;
+    NSString *name = NSStringFromClass(vc.class);
+    return [name containsString:@"AWELiveNewPreStreamViewController"] ||
+           [name containsString:@"AWELivePreStream"];
+}
+
+static void DYFSApplyLivePreviewLift(AWELivePreStream4LayerContainerView *container) {
+    if (!container || !DYFSIsEnabled() || !container.window) return;
+    if (!DYFSIsLivePreviewController(container)) return;
+
+    UIView *control = container.controlContainer;
+    if (control && !objc_getAssociatedObject(control, &kDYFSLiveAppliedKey)) {
+        // 直播预览底部控件的高度就是要避开的首页底栏高度。
+        // 只在进入窗口后的稳定布局阶段应用一次，避免切页首帧“上移 1cm 后又回来”。
+        CGFloat lift = MAX(gDYFSCurrentTabBarHeight, gDYFSOriginalTabBarHeight);
+        if (lift > 0.5) {
+            CGAffineTransform base = control.transform;
+            objc_setAssociatedObject(control, &kDYFSLiveAppliedKey,
+                                     [NSValue valueWithCGAffineTransform:base],
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            control.transform = CGAffineTransformTranslate(base, 0.0, -lift);
+        }
+    }
+
+    UIView *watermark = container.bottomDarkWatermark;
+    if (watermark && !objc_getAssociatedObject(watermark, &kDYFSLiveAppliedKey)) {
+        CGFloat lift = MAX(gDYFSCurrentTabBarHeight, gDYFSOriginalTabBarHeight);
+        CGAffineTransform base = watermark.transform;
+        objc_setAssociatedObject(watermark, &kDYFSLiveAppliedKey,
+                                 [NSValue valueWithCGAffineTransform:base],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        watermark.transform = CGAffineTransformTranslate(base, 0.0, -lift);
+    }
+}
+
+%hook AWELivePreStream4LayerContainerView
 - (void)layoutSubviews {
     %orig;
     if (!DYFSIsEnabled()) return;
-
-    UIViewController *vc = DYFSFirstViewControllerFromView(self);
-    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
-
-    static char kDYFSStatusBaseTransformKey;
-    NSValue *base = objc_getAssociatedObject(self, &kDYFSStatusBaseTransformKey);
-    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
-    if (!base) {
-        objc_setAssociatedObject(self, &kDYFSStatusBaseTransformKey,
-                                 [NSValue valueWithCGAffineTransform:baseTransform],
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    CGFloat shift = gDYFSCurrentTabBarHeight;
-    if (shift > 0.0) {
-        self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
-    }
+    if (!self.window) return;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DYFSApplyLivePreviewLift(self);
+    });
 }
 %end
 
@@ -618,8 +650,10 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 
         // 抖音的 switch cell 会先更新 isSwitchOn，再调用 block。
         BOOL enabled = strongItem.isSwitchOn;
-        [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kDYFSFullScreenEnabledKey];
+        [[NSUserDefaults standardUserDefaults] setBool:enabled
+                                                  forKey:kDYFSFullScreenEnabledKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
+        NSLog(@"[DY-FullScreen] switchChanged -> %@", enabled ? @"ON" : @"OFF");
     };
     return item;
 }
@@ -689,6 +723,7 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
         if ([name containsString:@"UserHome"] ||
             [name containsString:@"UserProfile"] ||
             [name containsString:@"ProfileViewController"] ||
+            [name containsString:@"Personal"] ||
             [name containsString:@"AWEAwemeDetailCellViewController"]) {
             return YES;
         }
@@ -699,14 +734,25 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
 %hook AWEAwemeDetailTableViewController
 
 - (BOOL)canShowFixedBottomBar {
-    if (DYFSIsAuthorWorkDetailContext(self.view)) return NO;
+    NSString *refer = self.referString;
+    BOOL author = DYFSIsAuthorWorkDetailContext(self.view) ||
+                  ([refer isKindOfClass:NSString.class] &&
+                   ([refer containsString:@"user"] ||
+                    [refer containsString:@"profile"] ||
+                    [refer containsString:@"personal"]));
+    if (author) return NO;
     return %orig;
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    if (DYFSIsAuthorWorkDetailContext(self.view) &&
-        [self respondsToSelector:@selector(setBottomBarHidden:)]) {
+    NSString *refer = self.referString;
+    BOOL author = DYFSIsAuthorWorkDetailContext(self.view) ||
+                  ([refer isKindOfClass:NSString.class] &&
+                   ([refer containsString:@"user"] ||
+                    [refer containsString:@"profile"] ||
+                    [refer containsString:@"personal"]));
+    if (author && [self respondsToSelector:@selector(setBottomBarHidden:)]) {
         [self setBottomBarHidden:YES];
     }
 }
