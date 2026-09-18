@@ -270,28 +270,72 @@ static UIWindow *DYFSActiveWindow(void) {
 @interface AWEFeedDataSafeTableView : UITableView
 @end
 
+static void DYFSAdjustFeedTableFrame(UITableView *table, CGRect *frame) {
+    if (!DYFSIsEnabled()) return;
+
+    UIView *parent = table.superview;
+    CGFloat target = parent ? parent.bounds.size.height : 0.0;
+    CGFloat current = frame->size.height;
+
+    if (target <= 0.0 || current >= target - 0.5 || current < target * 0.5) return;
+
+    if (!objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey)) {
+        objc_setAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey,
+                                 @(current), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if (!gDYFSStretchedTables) gDYFSStretchedTables = [NSHashTable weakObjectsHashTable];
+        [gDYFSStretchedTables addObject:table];
+    }
+
+    frame->size.height = target;
+}
+
+static UIView *DYFSFeedTableForView(UIView *view) {
+    if (!view) return nil;
+    Class tableClass = NSClassFromString(@"AWEFeedDataSafeTableView");
+    if (!tableClass) return nil;
+
+    UIView *ancestor = view.superview;
+    for (NSUInteger i = 0; ancestor && i < 8; i++, ancestor = ancestor.superview) {
+        if ([ancestor isKindOfClass:tableClass]) return ancestor;
+    }
+    return nil;
+}
+
+static CGFloat DYFSFeedTableOriginalHeight(UIView *view) {
+    UIView *table = DYFSFeedTableForView(view);
+    if (!table) return 0.0;
+    NSNumber *n = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
+    return n.doubleValue;
+}
+
+static void DYFSRestoreFeedTables(void) {
+    for (UITableView *table in gDYFSStretchedTables.allObjects) {
+        NSNumber *original = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
+        if (!original) continue;
+
+        objc_setAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+        CGRect f = table.frame;
+        f.size.height = original.doubleValue;
+        table.frame = f;
+    }
+    [gDYFSStretchedTables removeAllObjects];
+}
+
 %hook AWEFeedDataSafeTableView
 - (void)setFrame:(CGRect)frame {
-    if (!DYFSIsEnabled()) {
-        %orig(frame);
-        return;
-    }
+    DYFSAdjustFeedTableFrame(self, &frame);
+    %orig(frame);
+}
+%end
 
-    UIView *parent = self.superview;
-    CGFloat target = parent ? parent.bounds.size.height : 0.0;
-    CGFloat current = frame.size.height;
-
-    if (target <= 0.0 || current >= target - 0.5 || current < target * 0.5) {
-        %orig(frame);
-        return;
-    }
-
-    if (!objc_getAssociatedObject(self, &kDYFSFeedTableOriginalGapKey)) {
-        objc_setAssociatedObject(self, &kDYFSFeedTableOriginalGapKey,
-                                 @(target - current), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    frame.size.height = target;
+// AWEFeedTableView 在部分版本会自己实现 setFrame:，因此基类 hook 不够。
+@interface AWEFeedTableView : UITableView
+@end
+%hook AWEFeedTableView
+- (void)setFrame:(CGRect)frame {
+    DYFSAdjustFeedTableFrame(self, &frame);
     %orig(frame);
 }
 %end
