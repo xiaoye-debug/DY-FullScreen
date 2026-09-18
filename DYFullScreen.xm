@@ -162,6 +162,8 @@ static UIWindow *DYFSActiveWindow(void) {
 @property(nonatomic,strong) id model;
 @end
 
+static CGFloat DYFSFeedTableOriginalHeight(UIView *view);
+
 %hook AWEPlayInteractionViewController
 
 - (void)viewDidLayoutSubviews {
