@@ -672,6 +672,14 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 
 #pragma mark - Author profile comment bar removal
 
+// DYKiller 的关键点：从详情控制器入口阻止作者主页底栏显示。
+// 普通详情页保持原行为。
+@interface AWEAwemeDetailTableViewController : UIViewController
+@property(nonatomic,copy) NSString *referString;
+- (BOOL)canShowFixedBottomBar;
+- (void)setBottomBarHidden:(BOOL)hidden;
+@end
+
 static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     if (!view) return NO;
     UIResponder *r = view;
@@ -687,15 +695,6 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     }
     return NO;
 }
-
-// DYKiller 的关键点：不要只改输入框自己的 alpha，而是从详情控制器的
-// canShowFixedBottomBar 入口阻止底栏重新创建/恢复。
-// 对作者主页只生效，普通聊天详情不受影响。
-@interface AWEAwemeDetailTableViewController : UIViewController
-@property(nonatomic,copy) NSString *referString;
-- (BOOL)canShowFixedBottomBar;
-- (void)setBottomBarHidden:(BOOL)hidden;
-@end
 
 %hook AWEAwemeDetailTableViewController
 
@@ -714,32 +713,19 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
 
 %end
 
-@interface AWECommentInputBackgroundView : UIView @end
+#pragma mark - Native Swift comment input
 
-%hook AWECommentInputBackgroundView
-
-- (void)layoutSubviews {
-    %orig;
-    if (DYFSIsEnabled() && DYFSIsAuthorWorkDetailContext(self)) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-    }
-}
-
-%end
-
-// Swift 模块的真实运行时类名包含点号。
-// Logos 允许通过 %init(ClassName=runtimeClass) 把普通 token 绑定到真实类。
 %group DYFSAuthorSwiftCommentInput
 
 %hook CommentInputContainerView
 
 - (void)layoutSubviews {
     %orig;
-    if (DYFSIsEnabled() && DYFSIsAuthorWorkDetailContext(self)) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-        self.userInteractionEnabled = NO;
+    UIView *view = (UIView *)self;
+    if (DYFSIsEnabled() && DYFSIsAuthorWorkDetailContext(view)) {
+        view.hidden = YES;
+        view.alpha = 0.0;
+        view.userInteractionEnabled = NO;
     }
 }
 
