@@ -609,7 +609,7 @@ static void DYFSInstallNativeSetting(UIViewController *vc) {
     if (!vc || ![vc isKindOfClass:NSClassFromString(@"AWESettingBaseViewController")]) return;
 
     AWESettingsViewModel *vm = nil;
-    @try { vm = [vc viewModel]; } @catch (__unused NSException *e) {}
+    @try { vm = [(AWESettingBaseViewController *)vc viewModel]; } @catch (__unused NSException *e) {}
     if (!vm) return;
 
     NSArray *sections = vm.sectionDataArray;
