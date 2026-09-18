@@ -26,6 +26,19 @@ static char kDYFSAuthorOriginalFrameKey;
 
 static BOOL DYFSShouldAdjustMetalView(UIView *view);
 static BOOL DYFSIsAuthorWorkDetailContext(UIView *view);
+static BOOL DYFSIsInsideStretchedFeedTable(UIView *view) {
+    if (!view) return NO;
+    Class tableClass = NSClassFromString(@"AWEFeedDataSafeTableView");
+    UIView *p = view.superview;
+    for (NSUInteger i = 0; p && i < 12; i++, p = p.superview) {
+        if (tableClass && [p isKindOfClass:tableClass]) {
+            return objc_getAssociatedObject(p, &kDYFSFeedTableOriginalGapKey) != nil;
+        }
+    }
+    return NO;
+}
+
+
 
 static UIViewController *DYFSFirstViewControllerFromView(UIView *view) {
     if (!view) return nil;
@@ -200,6 +213,7 @@ static UIWindow *DYFSActiveWindow(void) {
     // 作品主页不能改 FeedTable 的分页高度，否则会破坏上下 Cell；
     // 但当前正在播放的作品视频容器本身仍然必须占满父容器。
     BOOL isAuthorProfile = DYFSIsAuthorProfileContext(self.view);
+    BOOL isStretchedFeedTable = DYFSIsInsideStretchedFeedTable(self.view);
     BOOL fullHeight =
         [refer isEqualToString:@"general_search"] ||
         [refer isEqualToString:@"search_result"] ||
@@ -209,7 +223,8 @@ static UIWindow *DYFSActiveWindow(void) {
         [refer isEqualToString:@"challenge"] ||
         [refer isEqualToString:@"general_search_scan"] ||
         refer == nil ||
-        isAuthorProfile;
+        isAuthorProfile ||
+        isStretchedFeedTable;
 
     if ([refer isEqualToString:@"co_play_watch"]) {
         Class rich = NSClassFromString(@"AWEFriendsImpl.RichContentNewListViewController");
