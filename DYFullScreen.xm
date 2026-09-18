@@ -753,6 +753,10 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
         [defaults setBool:YES forKey:kDYFSFullScreenEnabledKey];
     }
 
+    // 文件中除命名 group 外的所有 %hook 属于 Logos 自动生成的 _ungrouped group。
+    // 一旦存在命名 %group，就必须显式初始化这个默认 group。
+    %init(_ungrouped);
+
     Class swiftCommentInput = NSClassFromString(@"AWECommentInputViewSwiftImpl.CommentInputContainerView");
     if (swiftCommentInput) {
         %init(DYFSAuthorSwiftCommentInput, CommentInputContainerView=swiftCommentInput);
