@@ -1068,10 +1068,11 @@ static AWESettingItemModel *DYFSMakeGitHubItem(void) {
 
     AWESettingItemModel *item = [itemClass new];
     item.identifier = @"DYFSOpenSource";
-    item.title = @"https://github.com/xiaoye-debug/DY-FullScreen/blob/main/README.md";
+    item.title = @"v1.0 开源地址";
     item.subTitle = @"";
     item.detail = @"";
-    item.svgIconImageName = @"ic_link_16";
+    item.type = 0;
+    item.svgIconImageName = @"ic_gearsimplify_outlined_20";
     item.cellType = 26;
     item.colorStyle = 0;
     item.isEnable = YES;
