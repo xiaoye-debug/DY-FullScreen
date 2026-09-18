@@ -601,6 +601,41 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 }
 %end
 
+#pragma mark - Global HUD frame guard
+
+// Douyin 40.4.0 can write the interaction HUD frame again after
+// viewDidLayoutSubviews. Clamp that write at the source so the title/caption
+// cannot be pushed downward by a later layout pass.
+static CGRect DYFSAdjustGlobalHUDFrame(UIView *view, CGRect frame) {
+    if (!DYFSIsEnabled() || !view) return CGRectNull;
+
+    Class hudClass = NSClassFromString(@"AWEPlayInteractionViewController");
+    if (!hudClass || ![view.nextResponder isKindOfClass:hudClass]) return CGRectNull;
+
+    UIView *table = DYFSFeedTableForView(view);
+    if (!table) return CGRectNull;
+
+    NSNumber *originalNumber =
+        objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
+    CGFloat original = originalNumber.doubleValue;
+    if (original <= 0.0 || frame.size.height <= original + 0.5) return CGRectNull;
+
+    frame.origin.y = 0.0;
+    frame.size.height = original;
+    return frame;
+}
+
+%hook UIView
+- (void)setFrame:(CGRect)frame {
+    CGRect adjusted = DYFSAdjustGlobalHUDFrame(self, frame);
+    if (!CGRectIsNull(adjusted)) {
+        %orig(adjusted);
+        return;
+    }
+    %orig(frame);
+}
+%end
+
 #pragma mark - Native Douyin Settings fullscreen switch
 
 @interface AWESettingItemModel : NSObject
