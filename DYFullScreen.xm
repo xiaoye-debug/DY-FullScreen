@@ -21,10 +21,13 @@ BOOL DYFSIsEnabled(void) {
 static CGFloat gDYFSOriginalTabBarHeight = 0.0;
 static CGFloat gDYFSCurrentTabBarHeight = 0.0;
 
-static char kDYFSFeedTableOriginalGapKey;
-static char kDYFSFeedTableAppliedKey;
+static char kDYFSFeedTableOriginalHeightKey;
 static char kDYFSAuthorOriginalFrameKey;
 static char kDYFSLiveAppliedKey;
+
+static void (*gDYFSRestoreHooks[8])(void);
+static NSUInteger gDYFSRestoreCount = 0;
+static NSHashTable<UITableView *> *gDYFSStretchedTables;
 
 static BOOL DYFSShouldAdjustMetalView(UIView *view);
 static BOOL DYFSIsAuthorWorkDetailContext(UIView *view);
@@ -76,6 +79,17 @@ static BOOL DYFSIsAuthorProfileContext(UIView *view) {
     return NO;
 }
 
+static void DYFSRegisterRestore(void (*restore)(void)) {
+    if (!restore || gDYFSRestoreCount >= 8) return;
+    gDYFSRestoreHooks[gDYFSRestoreCount++] = restore;
+}
+
+static void DYFSRunRestoreHooks(void) {
+    for (NSUInteger i = 0; i < gDYFSRestoreCount; i++) {
+        if (gDYFSRestoreHooks[i]) gDYFSRestoreHooks[i]();
+    }
+}
+
 static UIWindow *DYFSActiveWindow(void) {
     for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
         if (![scene isKindOfClass:UIWindowScene.class]) continue;
@@ -121,6 +135,8 @@ static UIWindow *DYFSActiveWindow(void) {
         }
     }
     if (gDYFSCurrentTabBarHeight <= 0.0) gDYFSCurrentTabBarHeight = gDYFSOriginalTabBarHeight;
+
+    if (!DYFSIsEnabled()) return;
 
     Class bgClass = NSClassFromString(@"_UIBarBackground");
     for (UIView *sub in self.subviews) {
