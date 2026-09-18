@@ -673,6 +673,10 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 
         NSLog(@"[DY-FullScreen] switchChanged -> %@", enabled ? @"ON" : @"OFF");
 
+        if (!enabled) {
+            DYFSRunRestoreHooks();
+        }
+
         dispatch_async(dispatch_get_main_queue(), ^{
             UIWindow *window = DYFSActiveWindow();
             [window.rootViewController.view setNeedsLayout];
@@ -723,6 +727,10 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 - (void)setBottomBarHidden:(BOOL)hidden;
 @end
 
+static BOOL DYFSShouldHideDetailBottomBar(void) {
+    return DYFSIsEnabled();
+}
+
 static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     if (!view) return NO;
     UIResponder *r = view;
@@ -742,39 +750,31 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
 
 %hook AWEAwemeDetailTableViewController
 - (BOOL)canShowFixedBottomBar {
-    NSString *refer = self.referString;
-    BOOL author = DYFSIsEnabled() && (DYFSIsAuthorWorkDetailContext(self.view) ||
-                  ([refer isKindOfClass:NSString.class] &&
-                   ([refer containsString:@"user"] ||
-                    [refer containsString:@"profile"] ||
-                    [refer containsString:@"personal"])));
-    if (author) return NO;
+    if (DYFSShouldHideDetailBottomBar()) return NO;
     return %orig;
 }
+
 - (void)setBottomBarHidden:(BOOL)hidden {
-    NSString *refer = self.referString;
-    BOOL author = DYFSIsEnabled() && (DYFSIsAuthorWorkDetailContext(self.view) ||
-                  ([refer isKindOfClass:NSString.class] &&
-                   ([refer containsString:@"user"] ||
-                    [refer containsString:@"profile"] ||
-                    [refer containsString:@"personal"])));
-    if (author) {
-        hidden = YES;
-    }
+    if (DYFSShouldHideDetailBottomBar()) hidden = YES;
     %orig(hidden);
 }
 
 - (void)viewDidLayoutSubviews {
     %orig;
-    NSString *refer = self.referString;
-    BOOL author = DYFSIsEnabled() && (DYFSIsAuthorWorkDetailContext(self.view) ||
-                  ([refer isKindOfClass:NSString.class] &&
-                   ([refer containsString:@"user"] ||
-                    [refer containsString:@"profile"] ||
-                    [refer containsString:@"personal"])));
-    if (author && [self respondsToSelector:@selector(setBottomBarHidden:)]) {
+    if (DYFSShouldHideDetailBottomBar() &&
+        [self respondsToSelector:@selector(setBottomBarHidden:)]) {
         [self setBottomBarHidden:YES];
     }
+}
+%end
+
+@interface AWEAwemeIMDetailTableViewController : UIViewController
+- (void)setBottomBarHidden:(BOOL)hidden;
+@end
+%hook AWEAwemeIMDetailTableViewController
+- (void)setBottomBarHidden:(BOOL)hidden {
+    if (DYFSShouldHideDetailBottomBar()) hidden = YES;
+    %orig(hidden);
 }
 %end
 
@@ -800,6 +800,11 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     }
 
     %init(_ungrouped);
+
+    if (!gDYFSStretchedTables) {
+        gDYFSStretchedTables = [NSHashTable weakObjectsHashTable];
+    }
+    DYFSRegisterRestore(DYFSRestoreFeedTables);
 
     Class swiftCommentInput = NSClassFromString(@"AWECommentInputViewSwiftImpl.CommentInputContainerView");
     if (swiftCommentInput) {
