@@ -175,9 +175,16 @@ static UIWindow *DYFSActiveWindow(void) {
     if ([refer isEqualToString:@"chat"]) {
         id model = self.model;
         BOOL live = NO;
-        if ([model respondsToSelector:@selector(isLive)]) live = [model isLive];
-        if (!live && [model respondsToSelector:@selector(cellRoom)]) live = ([model cellRoom] != nil);
-        if (!live && [model respondsToSelector:@selector(videoFeedTag)]) live = [[model videoFeedTag] isEqualToString:@"直播中"];
+        if ([model respondsToSelector:@selector(isLive)]) {
+            live = ((BOOL (*)(id, SEL))objc_msgSend)(model, @selector(isLive));
+        }
+        if (!live && [model respondsToSelector:@selector(cellRoom)]) {
+            live = (((id (*)(id, SEL))objc_msgSend)(model, @selector(cellRoom)) != nil);
+        }
+        if (!live && [model respondsToSelector:@selector(videoFeedTag)]) {
+            id tag = ((id (*)(id, SEL))objc_msgSend)(model, @selector(videoFeedTag));
+            live = [tag isKindOfClass:NSString.class] && [tag isEqualToString:@"直播中"];
+        }
         if (!live) fullHeight = YES;
     }
 
@@ -399,7 +406,9 @@ static UIWindow *DYFSActiveWindow(void) {
 }
 %end
 
-static BOOL DYFSShouldAdjustMetalView(UIView *view);\n\nstatic BOOL DYFSShouldAdjustMetalView(UIView *view) {
+static BOOL DYFSShouldAdjustMetalView(UIView *view);
+
+static BOOL DYFSShouldAdjustMetalView(UIView *view) {
     if (!view || !DYFSIsEnabled()) return NO;
     if (view.bounds.size.width + 0.5 < UIScreen.mainScreen.bounds.size.width) return NO;
     UIViewController *vc = DYFSFirstViewControllerFromView(view);
