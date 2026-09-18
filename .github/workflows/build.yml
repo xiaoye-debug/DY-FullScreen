@@ -3,11 +3,17 @@ name: Build DY-FullScreen
 on:
   push:
     branches: [ main ]
+    tags:
+      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: macos-14
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,15 +34,30 @@ jobs:
           export THEOS_PACKAGE_SCHEME=rootless
           make clean package FINALPACKAGE=1
 
+      - name: Verify package
+        run: |
+          test -n "$(find packages -type f -name '*.deb' -print -quit)"
+          find packages -type f -name "*.deb" -exec dpkg-deb -I {} \;
+          find packages -type f -name "*.deb" -exec ls -lh {} \;
+
       - name: Collect package
         run: |
+          rm -rf artifacts
           mkdir -p artifacts
           find packages -type f -name "*.deb" -exec cp {} artifacts/ \;
           ls -lah artifacts
 
-      - name: Upload DEB
+      - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DY-FullScreen-deb
+          name: DY-FullScreen-v1.0-deb
           path: artifacts/*.deb
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DY-FullScreen ${{ github.ref_name }}
+          generate_release_notes: true
+          files: artifacts/*.deb
