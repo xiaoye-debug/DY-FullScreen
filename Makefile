@@ -6,7 +6,7 @@ INSTALL_TARGET_PROCESSES := Aweme
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME := DYFullScreen
-DYFullScreen_FILES := DYFullScreen.xm Sources/DYFSLivePreStreamLayoutCoordinator.m
+DYFullScreen_FILES := DYFullScreen.xm
 DYFullScreen_CFLAGS := -fobjc-arc -w -ISources
 DYFullScreen_FRAMEWORKS := UIKit Foundation QuartzCore
 
