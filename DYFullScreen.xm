@@ -23,6 +23,7 @@ static CGFloat gDYFSCurrentTabBarHeight = 0.0;
 static char kDYFSFeedTableOriginalGapKey;
 static char kDYFSFeedTableAppliedKey;
 static char kDYFSAuthorOriginalFrameKey;
+static char kDYFSLiveAppliedKey;
 
 static BOOL DYFSShouldAdjustMetalView(UIView *view);
 static BOOL DYFSIsAuthorWorkDetailContext(UIView *view);
@@ -166,8 +167,6 @@ static UIWindow *DYFSActiveWindow(void) {
     if (frame.size.width != screenWidth && frame.size.height < parentHeight) return;
 
     NSString *refer = self.referString;
-    // 作品主页不能改 FeedTable 的分页高度，否则会破坏上下 Cell；
-    // 但当前正在播放的作品视频容器本身仍然必须占满父容器。
     BOOL isAuthorProfile = DYFSIsAuthorProfileContext(self.view);
     BOOL fullHeight =
         [refer isEqualToString:@"general_search"] ||
@@ -263,8 +262,6 @@ static UIWindow *DYFSActiveWindow(void) {
     CGFloat target = parent ? parent.bounds.size.height : 0.0;
     CGFloat current = frame.size.height;
 
-    // 只处理“容器明显比表高、但表至少已有一半高度”的稳定布局阶段。
-    // 这是 DYKiller 的实际判定方式，避免布局早期半成品尺寸导致跳动。
     if (target <= 0.0 || current >= target - 0.5 || current < target * 0.5) {
         %orig(frame);
         return;
@@ -319,7 +316,6 @@ static UIWindow *DYFSActiveWindow(void) {
             }
             if (!isWorkImage) continue;
 
-            // 关键修复：原逻辑每次 layout 都 += tabBarHeight，导致滑动后位置累计漂移/重叠。
             CGRect original = subview.frame;
             NSValue *stored = objc_getAssociatedObject(subview, &kDYFSAuthorOriginalFrameKey);
             if (stored) original = stored.CGRectValue;
@@ -353,9 +349,6 @@ static UIWindow *DYFSActiveWindow(void) {
 }
 %end
 
-
-#pragma mark - Home live title / status label
-
 #pragma mark - Live preview chrome
 
 @interface AWELivePreStream4LayerContainerView : UIView
@@ -377,8 +370,6 @@ static void DYFSApplyLivePreviewLift(AWELivePreStream4LayerContainerView *contai
 
     UIView *control = container.controlContainer;
     if (control && !objc_getAssociatedObject(control, &kDYFSLiveAppliedKey)) {
-        // 直播预览底部控件的高度就是要避开的首页底栏高度。
-        // 只在进入窗口后的稳定布局阶段应用一次，避免切页首帧“上移 1cm 后又回来”。
         CGFloat lift = MAX(gDYFSCurrentTabBarHeight, gDYFSOriginalTabBarHeight);
         if (lift > 0.5) {
             CGAffineTransform base = control.transform;
@@ -568,9 +559,7 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
     NSArray *frames = objc_getAssociatedObject(self, &kDYFSConcernOriginalFramesKey);
     if (!frames) {
         NSMutableArray *saved = [NSMutableArray array];
-        for (UIView *v in self.subviews) {
-            [saved addObject:[NSValue valueWithCGRect:v.frame]];
-        }
+        for (UIView *v in self.subviews) [saved addObject:[NSValue valueWithCGRect:v.frame]];
         frames = [saved copy];
         objc_setAssociatedObject(self, &kDYFSConcernOriginalFramesKey, frames, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
@@ -647,11 +636,8 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
     item.switchChangedBlock = ^{
         AWESettingItemModel *strongItem = weakItem;
         if (!strongItem) return;
-
-        // 抖音的 switch cell 会先更新 isSwitchOn，再调用 block。
         BOOL enabled = strongItem.isSwitchOn;
-        [[NSUserDefaults standardUserDefaults] setBool:enabled
-                                                  forKey:kDYFSFullScreenEnabledKey];
+        [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kDYFSFullScreenEnabledKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
         NSLog(@"[DY-FullScreen] switchChanged -> %@", enabled ? @"ON" : @"OFF");
     };
@@ -659,21 +645,17 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 }
 
 %hook AWESettingsViewModel
-
 - (NSArray *)sectionDataArray {
     NSArray *sections = %orig;
     if (![sections isKindOfClass:NSArray.class]) return sections;
 
-    // 不重复插入；抖音会多次读取这个属性。
     for (id section in sections) {
         NSArray *items = nil;
         @try { items = [section valueForKey:@"itemArray"]; } @catch (__unused NSException *e) {}
         for (id item in items) {
             NSString *identifier = nil;
             @try { identifier = [item valueForKey:@"identifier"]; } @catch (__unused NSException *e) {}
-            if ([identifier isEqualToString:@"DYFSNativeFullScreen"]) {
-                return sections;
-            }
+            if ([identifier isEqualToString:@"DYFSNativeFullScreen"]) return sections;
         }
     }
 
@@ -690,24 +672,13 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 
     NSMutableArray *result = [sections mutableCopy];
     if (!result) result = [NSMutableArray array];
-    [result addObject:section];
+    [result insertObject:section atIndex:0];
     return [result copy];
 }
-
 %end
-
-#pragma mark - Live preview
-
-// 不再直接平移 AWELivePrestream 文案、昵称、状态标签。
-// 这类视图由抖音自己的布局管理；此前额外按底栏高度做 transform 会导致：
-// 1) 文案/名字被推到视频中部；
-// 2) 进入直播页第一条内容出现一次明显的延迟上移。
-// standalone 全屏只处理视频容器与底栏遮挡，不改直播预览文案坐标。
 
 #pragma mark - Author profile comment bar removal
 
-// DYKiller 的关键点：从详情控制器入口阻止作者主页底栏显示。
-// 普通详情页保持原行为。
 @interface AWEAwemeDetailTableViewController : UIViewController
 @property(nonatomic,copy) NSString *referString;
 - (BOOL)canShowFixedBottomBar;
@@ -732,7 +703,6 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
 }
 
 %hook AWEAwemeDetailTableViewController
-
 - (BOOL)canShowFixedBottomBar {
     NSString *refer = self.referString;
     BOOL author = DYFSIsAuthorWorkDetailContext(self.view) ||
@@ -743,7 +713,6 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     if (author) return NO;
     return %orig;
 }
-
 - (void)viewDidLayoutSubviews {
     %orig;
     NSString *refer = self.referString;
@@ -756,15 +725,10 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
         [self setBottomBarHidden:YES];
     }
 }
-
 %end
 
-#pragma mark - Native Swift comment input
-
 %group DYFSAuthorSwiftCommentInput
-
 %hook CommentInputContainerView
-
 - (void)layoutSubviews {
     %orig;
     UIView *view = (UIView *)self;
@@ -774,9 +738,7 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
         view.userInteractionEnabled = NO;
     }
 }
-
 %end
-
 %end
 
 %ctor {
@@ -785,8 +747,6 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
         [defaults setBool:YES forKey:kDYFSFullScreenEnabledKey];
     }
 
-    // 文件中除命名 group 外的所有 %hook 属于 Logos 自动生成的 _ungrouped group。
-    // 一旦存在命名 %group，就必须显式初始化这个默认 group。
     %init(_ungrouped);
 
     Class swiftCommentInput = NSClassFromString(@"AWECommentInputViewSwiftImpl.CommentInputContainerView");
