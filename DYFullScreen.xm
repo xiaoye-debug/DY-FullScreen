@@ -193,19 +193,9 @@ static UIWindow *DYFSActiveWindow(void) {
 
 %hook AWEDPlayerFeedPlayerViewController
 - (void)viewDidLayoutSubviews {
+    // Keep Douyin's original contentView geometry.
+    // Expanding this view to the stretched feed height pushes the title/caption down.
     %orig;
-    if (!DYFSIsEnabled()) return;
-    UIView *content = self.contentView;
-    if (!content.superview) return;
-    CGRect f = content.frame;
-    CGFloat h = content.superview.bounds.size.height;
-    if (fabs(f.size.height - (h - gDYFSCurrentTabBarHeight)) < 1.0) {
-        f.size.height = h;
-        content.frame = f;
-    } else if (fabs(f.size.height - (h - 2*gDYFSCurrentTabBarHeight)) < 1.0) {
-        f.size.height = h - gDYFSCurrentTabBarHeight;
-        content.frame = f;
-    }
 }
 %end
 
@@ -215,19 +205,9 @@ static UIWindow *DYFSActiveWindow(void) {
 
 %hook AWEDPlayerViewController_Merge
 - (void)viewDidLayoutSubviews {
+    // Keep Douyin's original contentView geometry so the title/caption
+    // remains at its normal position in fullscreen.
     %orig;
-    if (!DYFSIsEnabled()) return;
-    UIView *content = self.contentView;
-    if (!content.superview) return;
-    CGRect f = content.frame;
-    CGFloat h = content.superview.bounds.size.height;
-    if (fabs(f.size.height - (h - gDYFSCurrentTabBarHeight)) < 1.0) {
-        f.size.height = h;
-        content.frame = f;
-    } else if (fabs(f.size.height - (h - 2*gDYFSCurrentTabBarHeight)) < 1.0) {
-        f.size.height = h - gDYFSCurrentTabBarHeight;
-        content.frame = f;
-    }
 }
 %end
 
