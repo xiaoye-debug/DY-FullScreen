@@ -5,8 +5,6 @@
 #import <math.h>
 #import <QuartzCore/QuartzCore.h>
 
-#import "DYFSLivePreStreamLayoutCoordinator.h"
-
 #pragma mark - Standalone fullscreen state
 
 static NSString *const kDYFSFullScreenEnabledKey = @"DYYYEnableFullScreen";
@@ -583,7 +581,6 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 @property(nonatomic,assign) BOOL isEnable;
 @property(nonatomic,assign) BOOL isSwitchOn;
 @property(nonatomic,copy) void (^switchChangedBlock)(void);
-- (void)refreshCell;
 @end
 
 @interface AWESettingSectionModel : NSObject
@@ -599,36 +596,14 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 @property(nonatomic,assign) NSInteger colorStyle;
 @end
 
-@interface AWESettingBaseViewController : UIViewController
-- (AWESettingsViewModel *)viewModel;
-@end
+static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
+    Class itemClass = NSClassFromString(@"AWESettingItemModel");
+    if (!itemClass) return nil;
 
-static char kDYFSNativeSettingInstalledKey;
-
-static void DYFSInstallNativeSetting(UIViewController *vc) {
-    if (!vc || ![vc isKindOfClass:NSClassFromString(@"AWESettingBaseViewController")]) return;
-
-    AWESettingsViewModel *vm = nil;
-    @try { vm = [(AWESettingBaseViewController *)vc viewModel]; } @catch (__unused NSException *e) {}
-    if (!vm) return;
-
-    NSArray *sections = vm.sectionDataArray;
-    if (![sections isKindOfClass:NSArray.class]) return;
-
-    for (id section in sections) {
-        NSArray *items = nil;
-        @try { items = [section valueForKey:@"itemArray"]; } @catch (__unused NSException *e) {}
-        for (id item in items) {
-            NSString *identifier = nil;
-            @try { identifier = [item valueForKey:@"identifier"]; } @catch (__unused NSException *e) {}
-            if ([identifier isEqualToString:@"DYFSNativeFullScreen"]) return;
-        }
-    }
-
-    AWESettingItemModel *item = [NSClassFromString(@"AWESettingItemModel") new];
+    AWESettingItemModel *item = [itemClass new];
     item.identifier = @"DYFSNativeFullScreen";
-    item.title = @"启用首页全屏";
-    item.subTitle = @"视频扩展到屏幕底部，隐藏底栏遮挡";
+    item.title = @"视频全屏";
+    item.subTitle = @"首页、朋友页、搜索页和他人作品铺满屏幕";
     item.detail = @"";
     item.svgIconImageName = @"ic_fullscreen_outlined_16";
     item.cellType = 6;
@@ -640,132 +615,60 @@ static void DYFSInstallNativeSetting(UIViewController *vc) {
     item.switchChangedBlock = ^{
         AWESettingItemModel *strongItem = weakItem;
         if (!strongItem) return;
-        BOOL enabled = !strongItem.isSwitchOn;
-        strongItem.isSwitchOn = enabled;
+
+        // 抖音的 switch cell 会先更新 isSwitchOn，再调用 block。
+        BOOL enabled = strongItem.isSwitchOn;
         [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kDYFSFullScreenEnabledKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [vc.view setNeedsLayout];
-            [vc.view layoutIfNeeded];
-        });
     };
+    return item;
+}
 
-    AWESettingSectionModel *section = [NSClassFromString(@"AWESettingSectionModel") new];
+%hook AWESettingsViewModel
+
+- (NSArray *)sectionDataArray {
+    NSArray *sections = %orig;
+    if (![sections isKindOfClass:NSArray.class]) return sections;
+
+    // 不重复插入；抖音会多次读取这个属性。
+    for (id section in sections) {
+        NSArray *items = nil;
+        @try { items = [section valueForKey:@"itemArray"]; } @catch (__unused NSException *e) {}
+        for (id item in items) {
+            NSString *identifier = nil;
+            @try { identifier = [item valueForKey:@"identifier"]; } @catch (__unused NSException *e) {}
+            if ([identifier isEqualToString:@"DYFSNativeFullScreen"]) {
+                return sections;
+            }
+        }
+    }
+
+    AWESettingItemModel *item = DYFSMakeNativeFullscreenItem();
+    Class sectionClass = NSClassFromString(@"AWESettingSectionModel");
+    if (!item || !sectionClass) return sections;
+
+    AWESettingSectionModel *section = [sectionClass new];
     section.sectionHeaderTitle = @"DY-FullScreen";
     section.sectionHeaderHeight = 40.0;
-    section.sectionFooterTitle = @"关闭后本插件的全屏布局不会生效。";
+    section.sectionFooterTitle = @"关闭后全屏布局立即停止。";
     section.type = 0;
     section.itemArray = @[item];
 
-    NSMutableArray *newSections = [sections mutableCopy];
-    [newSections addObject:section];
-    vm.sectionDataArray = [newSections copy];
-    objc_setAssociatedObject(vc, &kDYFSNativeSettingInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    if ([vc.view respondsToSelector:@selector(setNeedsLayout)]) {
-        [vc.view setNeedsLayout];
-    }
+    NSMutableArray *result = [sections mutableCopy];
+    if (!result) result = [NSMutableArray array];
+    [result addObject:section];
+    return [result copy];
 }
 
-%hook AWESettingBaseViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig(animated);
-    dispatch_async(dispatch_get_main_queue(), ^{
-        DYFSInstallNativeSetting(self);
-    });
-}
 %end
 
-#pragma mark - Direct live preview title / copy layout
+#pragma mark - Live preview
 
-static void DYFSShiftLivePreviewStack(UIView *stack) {
-    if (!stack || !DYFSIsEnabled()) return;
-
-    UIViewController *vc = DYFSFirstViewControllerFromView(stack);
-    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
-
-    Class guideClass = NSClassFromString(@"AWELivePrestreamGuideView");
-    Class tagClass = NSClassFromString(@"AWELiveFeedLabelTagView");
-    Class statusClass = NSClassFromString(@"AWELiveFeedStatusLabel");
-
-    BOOL hasGuide = guideClass && DYFSContainsSubviewOfClass(guideClass, stack);
-    BOOL hasTag = tagClass && DYFSContainsSubviewOfClass(tagClass, stack);
-    BOOL hasStatus = statusClass && DYFSContainsSubviewOfClass(statusClass, stack);
-
-    if (!hasGuide && !hasTag && !hasStatus) return;
-
-    UIWindow *window = stack.window;
-    CGFloat shift = gDYFSCurrentTabBarHeight;
-    if (window && window.safeAreaInsets.bottom == 0.0) {
-        shift = MAX(0.0, gDYFSCurrentTabBarHeight - gDYFSOriginalTabBarHeight);
-    }
-    if (shift <= 0.0) return;
-
-    static char kDYFSLiveBaseTransformKey;
-    NSValue *base = objc_getAssociatedObject(stack, &kDYFSLiveBaseTransformKey);
-    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : stack.transform;
-    if (!base) {
-        objc_setAssociatedObject(stack, &kDYFSLiveBaseTransformKey,
-                                 [NSValue valueWithCGAffineTransform:baseTransform],
-                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    CGFloat scale = 1.0;
-    if (hasGuide || hasTag || hasStatus) {
-        NSString *scaleString = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYNicknameScale"];
-        CGFloat v = [scaleString floatValue];
-        if (v > 0.01) scale = v;
-    }
-
-    CGFloat ty = -shift;
-    NSArray *subs = [stack.subviews copy];
-    for (UIView *v in subs) {
-        CGFloat h = v.bounds.size.height;
-        ty += (h - h * scale) * 0.5;
-    }
-
-    CGAffineTransform t = CGAffineTransformConcat(baseTransform,
-        CGAffineTransformMake(scale, 0, 0, scale, 0, ty));
-    if (!CGAffineTransformEqualToTransform(stack.transform, t)) {
-        stack.transform = t;
-    }
-}
-
-@interface AWEElementStackView : UIView @end
-%hook AWEElementStackView
-- (void)layoutSubviews {
-    %orig;
-    DYFSShiftLivePreviewStack(self);
-}
-%end
-
-@interface IESLiveStackView : UIView @end
-%hook IESLiveStackView
-- (void)layoutSubviews {
-    %orig;
-    DYFSShiftLivePreviewStack(self);
-}
-%end
-
-@interface AWELiveFeedLabelTagView : UIView @end
-%hook AWELiveFeedLabelTagView
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
-    UIViewController *vc = DYFSFirstViewControllerFromView(self);
-    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
-
-    static char kDYFSTagBaseTransformKey;
-    NSValue *base = objc_getAssociatedObject(self, &kDYFSTagBaseTransformKey);
-    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
-    if (!base) objc_setAssociatedObject(self, &kDYFSTagBaseTransformKey,
-                                        [NSValue valueWithCGAffineTransform:baseTransform],
-                                        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    CGFloat shift = gDYFSCurrentTabBarHeight;
-    if (shift > 0.0) self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
-}
-%end
+// 不再直接平移 AWELivePrestream 文案、昵称、状态标签。
+// 这类视图由抖音自己的布局管理；此前额外按底栏高度做 transform 会导致：
+// 1) 文案/名字被推到视频中部；
+// 2) 进入直播页第一条内容出现一次明显的延迟上移。
+// standalone 全屏只处理视频容器与底栏遮挡，不改直播预览文案坐标。
 
 #pragma mark - Author profile comment bar removal
 
@@ -773,22 +676,87 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     if (!view) return NO;
     UIResponder *r = view;
     NSInteger depth = 0;
-    while ((r = [r nextResponder]) && depth++ < 30) {
+    while ((r = [r nextResponder]) && depth++ < 40) {
         NSString *name = NSStringFromClass(r.class);
         if ([name containsString:@"UserHome"] ||
             [name containsString:@"UserProfile"] ||
             [name containsString:@"ProfileViewController"] ||
-            [name isEqualToString:@"AWEAwemeDetailCellViewController"]) {
+            [name containsString:@"AWEAwemeDetailCellViewController"]) {
             return YES;
         }
     }
     return NO;
 }
 
+// DYKiller 的关键点：不要只改输入框自己的 alpha，而是从详情控制器的
+// canShowFixedBottomBar 入口阻止底栏重新创建/恢复。
+// 对作者主页只生效，普通聊天详情不受影响。
+@interface AWEAwemeDetailTableViewController : UIViewController
+@property(nonatomic,copy) NSString *referString;
+- (BOOL)canShowFixedBottomBar;
+- (void)setBottomBarHidden:(BOOL)hidden;
+@end
+
+%hook AWEAwemeDetailTableViewController
+
+- (BOOL)canShowFixedBottomBar {
+    if (DYFSIsAuthorWorkDetailContext(self.view)) return NO;
+    return %orig;
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (DYFSIsAuthorWorkDetailContext(self.view) &&
+        [self respondsToSelector:@selector(setBottomBarHidden:)]) {
+        [self setBottomBarHidden:YES];
+    }
+}
+
+%end
+
+@interface AWECommentInputBackgroundView : UIView @end
+
+%hook AWECommentInputBackgroundView
+
+- (void)layoutSubviews {
+    %orig;
+    if (DYFSIsEnabled() && DYFSIsAuthorWorkDetailContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+    }
+}
+
+%end
+
+// Swift 模块的真实运行时类名包含点号。
+// Logos 允许通过 %init(ClassName=runtimeClass) 把普通 token 绑定到真实类。
+%group DYFSAuthorSwiftCommentInput
+
+%hook CommentInputContainerView
+
+- (void)layoutSubviews {
+    %orig;
+    if (DYFSIsEnabled() && DYFSIsAuthorWorkDetailContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+        self.userInteractionEnabled = NO;
+    }
+}
+
+%end
+
+%end
+
 %ctor {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if ([defaults objectForKey:kDYFSFullScreenEnabledKey] == nil) {
         [defaults setBool:YES forKey:kDYFSFullScreenEnabledKey];
     }
+
+    Class swiftCommentInput = NSClassFromString(@"AWECommentInputViewSwiftImpl.CommentInputContainerView");
+    if (swiftCommentInput) {
+        %init(DYFSAuthorSwiftCommentInput, CommentInputContainerView=swiftCommentInput);
+    }
+
     NSLog(@"[DY-FullScreen] loaded, fullscreen=%@", DYFSIsEnabled() ? @"ON" : @"OFF");
 }
