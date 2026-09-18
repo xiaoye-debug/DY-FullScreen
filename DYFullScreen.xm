@@ -139,6 +139,37 @@ static UIWindow *DYFSActiveWindow(void) {
 
 #pragma mark - Main feed/detail height
 
+#pragma mark - DYKiller-style feed table stretching
+
+@interface AWEFeedDataSafeTableView : UITableView
+@end
+
+%hook AWEFeedDataSafeTableView
+
+- (void)setFrame:(CGRect)frame {
+    if (!DYFSIsEnabled()) {
+        %orig(frame);
+        return;
+    }
+
+    UIView *parent = self.superview;
+    CGFloat target = parent ? parent.bounds.size.height : 0.0;
+    CGFloat current = frame.size.height;
+
+    if (target > 0.0 && current < target - 0.5 && current >= target * 0.5) {
+        if (!objc_getAssociatedObject(self, &kDYFSFeedTableOriginalGapKey)) {
+            objc_setAssociatedObject(self, &kDYFSFeedTableOriginalGapKey,
+                                     @(target - current),
+                                     OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        }
+        frame.size.height = target;
+    }
+
+    %orig(frame);
+}
+
+%end
+
 @interface AWEPlayInteractionViewController : UIViewController
 @property(nonatomic,copy) NSString *referString;
 @property(nonatomic,strong) id model;
@@ -258,9 +289,6 @@ static UIWindow *DYFSActiveWindow(void) {
     UIView *superview = self.superview;
     if (!superview) return;
 
-    // 关键修复：作品主页不要强改 FeedTable 高度。
-    if (DYFSIsAuthorProfileContext(self)) return;
-
     BOOL applied = [objc_getAssociatedObject(self, &kDYFSFeedTableAppliedKey) boolValue];
     CGFloat superH = superview.bounds.size.height;
 
@@ -352,31 +380,78 @@ static UIWindow *DYFSActiveWindow(void) {
 %end
 
 
-#pragma mark - Home live title / status label
+#pragma mark - Live preview HUD
 
-@interface AWELiveFeedStatusLabel : UIView @end
-%hook AWELiveFeedStatusLabel
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
+@interface AWELivePreStream4LayerContainerView : UIView
+@property(nonatomic,strong) UIImageView *bottomDarkWatermark;
+@property(nonatomic,strong) UIView *controlContainer;
+@end
 
-    UIViewController *vc = DYFSFirstViewControllerFromView(self);
-    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
+static char kDYFSLiveChromeTransformKey;
+static char kDYFSBaselineTransformKey;
 
-    static char kDYFSStatusBaseTransformKey;
-    NSValue *base = objc_getAssociatedObject(self, &kDYFSStatusBaseTransformKey);
-    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
-    if (!base) {
-        objc_setAssociatedObject(self, &kDYFSStatusBaseTransformKey,
-                                 [NSValue valueWithCGAffineTransform:baseTransform],
+static void DYFSApplyLiveLift(UIView *target, CGFloat lift, BOOL wanted) {
+    if (!target) return;
+
+    NSValue *baseline = objc_getAssociatedObject(target, &kDYFSBaselineTransformKey);
+    if (!baseline) {
+        if (!CGAffineTransformIsIdentity(target.transform)) return;
+        baseline = [NSValue valueWithCGAffineTransform:target.transform];
+        objc_setAssociatedObject(target, &kDYFSBaselineTransformKey, baseline,
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
-    CGFloat shift = gDYFSCurrentTabBarHeight;
-    if (shift > 0.0) {
-        self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
+    if (wanted && lift > 0.5) {
+        target.transform = CGAffineTransformMakeTranslation(0.0, -lift);
+        objc_setAssociatedObject(target, &kDYFSLiveChromeTransformKey, @YES,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    } else if (objc_getAssociatedObject(target, &kDYFSLiveChromeTransformKey)) {
+        target.transform = baseline.CGAffineTransformValue;
+        objc_setAssociatedObject(target, &kDYFSLiveChromeTransformKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 }
+
+static CGFloat DYFSCurrentLiveLift(AWELivePreStream4LayerContainerView *container) {
+    if (!container) return 0.0;
+
+    Class tableClass = NSClassFromString(@"AWEFeedDataSafeTableView");
+    UIView *ancestor = container.superview;
+    for (NSUInteger i = 0; ancestor && i < 12; i++, ancestor = ancestor.superview) {
+        if (tableClass && [ancestor isKindOfClass:tableClass]) {
+            NSNumber *gap = objc_getAssociatedObject(ancestor, &kDYFSFeedTableOriginalGapKey);
+            return gap ? MAX(gap.doubleValue, 0.0) : 0.0;
+        }
+    }
+    return 0.0;
+}
+
+static void DYFSSyncLiveChrome(AWELivePreStream4LayerContainerView *container) {
+    if (!container) return;
+
+    CGFloat lift = DYFSIsEnabled() ? DYFSCurrentLiveLift(container) : 0.0;
+
+    // DYKiller 实际使用具名 controlContainer：昵称、简介、直播中标签、
+    // 进入直播间按钮等都在这个容器里，不能只移动一个 status label。
+    DYFSApplyLiveLift(container.controlContainer, lift, lift > 0.5);
+
+    UIImageView *watermark = container.bottomDarkWatermark;
+    BOOL watermarkWanted = NO;
+    if (watermark && lift > 0.5) {
+        CGRect f = watermark.frame;
+        CGFloat bottom = CGRectGetMaxY(f);
+        watermarkWanted = bottom > container.bounds.size.height - lift + 0.5;
+    }
+    DYFSApplyLiveLift(watermark, lift, watermarkWanted);
+}
+
+%hook AWELivePreStream4LayerContainerView
+
+- (void)layoutSubviews {
+    %orig;
+    DYFSSyncLiveChrome(self);
+}
+
 %end
 
 #pragma mark - Visual cleanup needed by fullscreen
@@ -617,7 +692,8 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
         if (!strongItem) return;
 
         // 抖音的 switch cell 会先更新 isSwitchOn，再调用 block。
-        BOOL enabled = strongItem.isSwitchOn;
+        BOOL enabled = !strongItem.isSwitchOn;
+        strongItem.isSwitchOn = enabled;
         [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kDYFSFullScreenEnabledKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
     };
@@ -656,7 +732,7 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
 
     NSMutableArray *result = [sections mutableCopy];
     if (!result) result = [NSMutableArray array];
-    [result addObject:section];
+    [result insertObject:section atIndex:0];
     return [result copy];
 }
 
