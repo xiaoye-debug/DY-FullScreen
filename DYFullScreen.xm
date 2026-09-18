@@ -12,7 +12,8 @@ static NSString *const kDYFSFullScreenEnabledKey = @"DYYYEnableFullScreen";
 BOOL DYFSIsEnabled(void) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     if ([defaults objectForKey:kDYFSFullScreenEnabledKey] == nil) {
-        [defaults setBool:YES forKey:kDYFSFullScreenEnabledKey];
+        [defaults setBool:NO forKey:kDYFSFullScreenEnabledKey];
+        [defaults synchronize];
     }
     return [defaults boolForKey:kDYFSFullScreenEnabledKey];
 }
@@ -636,10 +637,21 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
     item.switchChangedBlock = ^{
         AWESettingItemModel *strongItem = weakItem;
         if (!strongItem) return;
-        BOOL enabled = strongItem.isSwitchOn;
-        [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kDYFSFullScreenEnabledKey];
+
+        BOOL enabled = !strongItem.isSwitchOn;
+        strongItem.isSwitchOn = enabled;
+
+        [[NSUserDefaults standardUserDefaults] setBool:enabled
+                                                  forKey:kDYFSFullScreenEnabledKey];
         [[NSUserDefaults standardUserDefaults] synchronize];
+
         NSLog(@"[DY-FullScreen] switchChanged -> %@", enabled ? @"ON" : @"OFF");
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            UIWindow *window = DYFSActiveWindow();
+            [window.rootViewController.view setNeedsLayout];
+            [window.rootViewController.view layoutIfNeeded];
+        });
     };
     return item;
 }
@@ -705,7 +717,7 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
 %hook AWEAwemeDetailTableViewController
 - (BOOL)canShowFixedBottomBar {
     NSString *refer = self.referString;
-    BOOL author = DYFSIsAuthorWorkDetailContext(self.view) ||
+    BOOL author = DYFSIsEnabled() && (DYFSIsAuthorWorkDetailContext(self.view) ||
                   ([refer isKindOfClass:NSString.class] &&
                    ([refer containsString:@"user"] ||
                     [refer containsString:@"profile"] ||
@@ -720,7 +732,7 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
                   ([refer isKindOfClass:NSString.class] &&
                    ([refer containsString:@"user"] ||
                     [refer containsString:@"profile"] ||
-                    [refer containsString:@"personal"]));
+                    [refer containsString:@"personal"])));
     if (author && [self respondsToSelector:@selector(setBottomBarHidden:)]) {
         [self setBottomBarHidden:YES];
     }
