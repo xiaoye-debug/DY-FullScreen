@@ -25,6 +25,7 @@ static char kDYFSFeedTableAppliedKey;
 static char kDYFSAuthorOriginalFrameKey;
 
 static BOOL DYFSShouldAdjustMetalView(UIView *view);
+static BOOL DYFSIsAuthorWorkDetailContext(UIView *view);
 
 static UIViewController *DYFSFirstViewControllerFromView(UIView *view) {
     if (!view) return nil;
@@ -353,78 +354,29 @@ static UIWindow *DYFSActiveWindow(void) {
 
 #pragma mark - Home live title / status label
 
-@interface AWELiveFeedStatusLabel : UIView
-@end
-
+@interface AWELiveFeedStatusLabel : UIView @end
 %hook AWELiveFeedStatusLabel
-
 - (void)layoutSubviews {
     %orig;
-
-    static char kDYFSBaseTransformKey;
-    if (!self.window || self.hidden || self.alpha <= 0.01) return;
-
-    UIWindow *window = self.window;
-    Class tabBarClass = NSClassFromString(@"AWENormalModeTabBar");
-    UIView *tabBar = nil;
-
-    if (tabBarClass) {
-        NSArray *bars = DYFSFindAllSubviewsOfClass(tabBarClass, window);
-        for (UIView *candidate in bars) {
-            if (candidate.hidden || candidate.alpha <= 0.01) continue;
-            CGRect rect = [candidate convertRect:candidate.bounds toView:window];
-            if (CGRectGetMidY(rect) >= CGRectGetMidY(window.bounds) &&
-                CGRectGetHeight(CGRectIntersection(rect, window.bounds)) > 1.0) {
-                tabBar = candidate;
-                break;
-            }
-        }
-    }
-
-    if (!tabBar) return;
+    if (!DYFSIsEnabled()) return;
 
     UIViewController *vc = DYFSFirstViewControllerFromView(self);
-    BOOL inPlayInteraction = NO;
-    UIResponder *responder = self;
-    NSInteger depth = 0;
-    while ((responder = [responder nextResponder]) && depth++ < 20) {
-        NSString *name = NSStringFromClass([responder class]);
-        if ([name isEqualToString:@"AWEPlayInteractionViewController"]) {
-            inPlayInteraction = YES;
-            break;
-        }
-    }
+    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
 
-    if (!inPlayInteraction && ![vc isKindOfClass:NSClassFromString(@"AWEFeedTableViewController")]) {
-        return;
-    }
-
-    CGRect labelRect = [self convertRect:self.bounds toView:window];
-    CGRect tabRect = [tabBar convertRect:tabBar.bounds toView:window];
-    CGFloat overlap = CGRectGetMaxY(labelRect) - CGRectGetMinY(tabRect);
-
-    CGAffineTransform baseTransform = CGAffineTransformIdentity;
-    NSValue *stored = objc_getAssociatedObject(self, &kDYFSBaseTransformKey);
-    if (stored) {
-        baseTransform = stored.CGAffineTransformValue;
-    } else {
-        baseTransform = self.transform;
-        objc_setAssociatedObject(self, &kDYFSBaseTransformKey,
+    static char kDYFSStatusBaseTransformKey;
+    NSValue *base = objc_getAssociatedObject(self, &kDYFSStatusBaseTransformKey);
+    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
+    if (!base) {
+        objc_setAssociatedObject(self, &kDYFSStatusBaseTransformKey,
                                  [NSValue valueWithCGAffineTransform:baseTransform],
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
-    if (overlap > 0.0) {
-        CGFloat offset = MIN(overlap + 6.0, CGRectGetHeight(window.bounds) * 0.20);
-        CGAffineTransform adjusted = CGAffineTransformTranslate(baseTransform, 0.0, -offset);
-        if (!CGAffineTransformEqualToTransform(self.transform, adjusted)) {
-            self.transform = adjusted;
-        }
-    } else if (!CGAffineTransformEqualToTransform(self.transform, baseTransform)) {
-        self.transform = baseTransform;
+    CGFloat shift = gDYFSCurrentTabBarHeight;
+    if (shift > 0.0) {
+        self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
     }
 }
-
 %end
 
 #pragma mark - Visual cleanup needed by fullscreen
@@ -540,7 +492,7 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 - (void)layoutSubviews {
     %orig;
     if (!DYFSIsEnabled()) return;
-    if (DYFSIsAuthorProfileContext(self)) {
+    if (DYFSIsAuthorWorkDetailContext(self) || DYFSIsAuthorProfileContext(self)) {
         self.hidden = YES;
         self.alpha = 0.0;
         return;
@@ -606,7 +558,7 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
     %orig;
     if (!DYFSIsEnabled()) return;
 
-    if (DYFSIsAuthorProfileContext(self)) {
+    if (DYFSIsAuthorWorkDetailContext(self) || DYFSIsAuthorProfileContext(self)) {
         self.hidden = YES;
         self.alpha = 0.0;
         return;
@@ -793,28 +745,6 @@ static void DYFSShiftLivePreviewStack(UIView *stack) {
 }
 %end
 
-@interface AWELiveFeedStatusLabel : UILabel @end
-%hook AWELiveFeedStatusLabel
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
-    UIViewController *vc = DYFSFirstViewControllerFromView(self);
-    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
-
-    static char kDYFSStatusBaseTransformKey;
-    NSValue *base = objc_getAssociatedObject(self, &kDYFSStatusBaseTransformKey);
-    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
-    if (!base) objc_setAssociatedObject(self, &kDYFSStatusBaseTransformKey,
-                                        [NSValue valueWithCGAffineTransform:baseTransform],
-                                        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-
-    CGFloat shift = gDYFSCurrentTabBarHeight;
-    if (shift > 0.0) {
-        self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
-    }
-}
-%end
-
 @interface AWELiveFeedLabelTagView : UIView @end
 %hook AWELiveFeedLabelTagView
 - (void)layoutSubviews {
@@ -852,28 +782,6 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     }
     return NO;
 }
-
-%hook CommentInputContainerView
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
-    if (DYFSIsAuthorWorkDetailContext(self)) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-    }
-}
-%end
-
-%hook AWECommentInputBackgroundView
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
-    if (DYFSIsAuthorWorkDetailContext(self)) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-    }
-}
-%end
 
 %ctor {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
