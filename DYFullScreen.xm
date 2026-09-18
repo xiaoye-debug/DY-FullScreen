@@ -282,9 +282,6 @@ static void DYFSRestoreFeedTables(void) {
 
 #pragma mark - Author profile / image works
 
-@interface AWEStoryContainerCollectionView : UIView
-@end
-
 %hook AWEStoryContainerCollectionView
 - (void)layoutSubviews {
     %orig;
@@ -984,7 +981,7 @@ static void DYFSSyncKnowledgeGradient(UIView *gradient) {
 
 %ctor {
     gDYFSRichManagedViews = [NSHashTable weakObjectsHashTable];
-    DYFSRegisterRestoreHook(DYFSRestoreRichManaged);
+    DYFSRegisterRestore(DYFSRestoreRichManaged);
 }
 
 #pragma mark - Native Douyin Settings fullscreen switch
