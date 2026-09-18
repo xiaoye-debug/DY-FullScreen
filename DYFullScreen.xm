@@ -1026,6 +1026,7 @@ static void DYFSSyncKnowledgeGradient(UIView *gradient) {
 @property(nonatomic,assign) NSInteger colorStyle;
 @property(nonatomic,assign) BOOL isEnable;
 @property(nonatomic,assign) BOOL isSwitchOn;
+@property(nonatomic,copy) void (^cellTappedBlock)(void);
 @property(nonatomic,copy) void (^switchChangedBlock)(void);
 @end
 
@@ -1067,15 +1068,15 @@ static AWESettingItemModel *DYFSMakeGitHubItem(void) {
 
     AWESettingItemModel *item = [itemClass new];
     item.identifier = @"DYFSOpenSource";
-    item.title = @"开源地址";
+    item.title = @"v1.0 开源地址";
     item.subTitle = @"GitHub：xiaoye-debug/DY-FullScreen";
     item.detail = @"";
     item.svgIconImageName = @"ic_link_16";
-    item.cellType = 1;
+    item.cellType = 26;
     item.colorStyle = 0;
     item.isEnable = YES;
     item.isSwitchOn = NO;
-    item.switchChangedBlock = ^{
+    item.cellTappedBlock = ^{
         DYFSOpenGitHub();
     };
     return item;
