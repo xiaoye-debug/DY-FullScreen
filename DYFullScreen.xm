@@ -846,6 +846,147 @@ static void DYFSApplyBackdrop(id owner, UIView *anchor, UIColor *color) {
 
 %end
 
+#pragma mark - Rich content / article fullscreen
+
+@interface RichContentContainerViewController : UIViewController
+@property(nonatomic,strong) UIViewController *contentListViewController;
+- (void)updateShrinkState:(BOOL)shrink insets:(UIEdgeInsets)insets animated:(BOOL)animated;
+- (void)updateShrinkState:(BOOL)shrink insets:(UIEdgeInsets)insets animated:(BOOL)animated animationDuration:(double)duration;
+@end
+
+@interface AWEKnowledgeGradientView : UIView
+@end
+
+@interface AWEStoryContainerCollectionView : UICollectionView
+@end
+
+static char kDYFSRichClipKey;
+static char kDYFSKnowledgeTransformKey;
+static char kDYFSRichGradientTransformKey;
+static NSHashTable<UIView *> *gDYFSRichManagedViews;
+
+static CGRect DYFSRichIdentityFrame(UIView *view) {
+    CGFloat w = CGRectGetWidth(view.bounds);
+    CGFloat h = CGRectGetHeight(view.bounds);
+    return CGRectMake(view.center.x - w * view.layer.anchorPoint.x,
+                      view.center.y - h * view.layer.anchorPoint.y,
+                      w, h);
+}
+
+static void DYFSRestoreRichTransform(UIView *view, const void *key) {
+    NSValue *v = objc_getAssociatedObject(view, key);
+    if (!v) return;
+    view.transform = v.CGAffineTransformValue;
+    objc_setAssociatedObject(view, key, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static BOOL DYFSApplyRichStretch(UIView *view, const void *key, CGFloat top, CGFloat bottom) {
+    if (!view) return NO;
+    CGFloat h = CGRectGetHeight(view.bounds);
+    if (h <= 0.0 || bottom <= top + h + 0.5) return NO;
+
+    NSValue *baseline = objc_getAssociatedObject(view, key);
+    if (!baseline) {
+        if (!CGAffineTransformIsIdentity(view.transform)) return NO;
+        baseline = [NSValue valueWithCGAffineTransform:view.transform];
+        objc_setAssociatedObject(view, key, baseline, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    CGFloat scaleY = (bottom - top) / h;
+    CGAffineTransform t = CGAffineTransformMake(1.0, 0.0, 0.0, scaleY,
+                                                  0.0, (h * 0.5) * (scaleY - 1.0));
+    if (!CGAffineTransformEqualToTransform(view.transform, t)) view.transform = t;
+    return YES;
+}
+
+static void DYFSAllowRichOverflow(UIView *view) {
+    if (!view) return;
+    if (!objc_getAssociatedObject(view, &kDYFSRichClipKey)) {
+        if (!view.clipsToBounds) return;
+        objc_setAssociatedObject(view, &kDYFSRichClipKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        [gDYFSRichManagedViews addObject:view];
+    }
+    view.clipsToBounds = NO;
+}
+
+static void DYFSRestoreRichOverflow(UIView *view) {
+    if (!objc_getAssociatedObject(view, &kDYFSRichClipKey)) return;
+    view.clipsToBounds = YES;
+    objc_setAssociatedObject(view, &kDYFSRichClipKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static UIView *DYFSRichCellContent(UIView *view) {
+    return DYFSCellContentView(view ? view.superview : nil);
+}
+
+static CGFloat DYFSRichFullHeight(UIView *view) {
+    UIView *content = DYFSRichCellContent(view);
+    return content ? CGRectGetHeight(content.bounds) : 0.0;
+}
+
+static void DYFSRestoreRichManaged(void) {
+    for (UIView *view in gDYFSRichManagedViews.allObjects) {
+        DYFSRestoreRichTransform(view, &kDYFSKnowledgeTransformKey);
+        DYFSRestoreRichTransform(view, &kDYFSRichGradientTransformKey);
+        DYFSRestoreRichOverflow(view);
+    }
+    [gDYFSRichManagedViews removeAllObjects];
+}
+
+static void DYFSSyncKnowledgeGradient(UIView *gradient) {
+    if (!gradient) return;
+    CGFloat full = DYFSIsEnabled() ? DYFSRichFullHeight(gradient) : 0.0;
+    CGFloat h = CGRectGetHeight(gradient.bounds);
+
+    if (full > h + 0.5 &&
+        DYFSApplyRichStretch(gradient, &kDYFSKnowledgeTransformKey, 0.0, full)) {
+        [gDYFSRichManagedViews addObject:gradient];
+        return;
+    }
+    DYFSRestoreRichTransform(gradient, &kDYFSKnowledgeTransformKey);
+}
+
+%hook RichContentContainerViewController
+
+- (void)updateShrinkState:(BOOL)shrink insets:(UIEdgeInsets)insets animated:(BOOL)animated {
+    if (shrink && DYFSIsEnabled()) return;
+    %orig;
+}
+
+- (void)updateShrinkState:(BOOL)shrink insets:(UIEdgeInsets)insets animated:(BOOL)animated animationDuration:(double)duration {
+    if (shrink && DYFSIsEnabled()) return;
+    %orig;
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (DYFSIsEnabled()) {
+        UIView *root = self.viewIfLoaded;
+        if (root) {
+            UIView *content = DYFSCellContentView(root);
+            if (content && CGRectGetHeight(content.bounds) > CGRectGetHeight(root.bounds) + 0.5) {
+                DYFSAllowRichOverflow(root);
+            }
+        }
+    }
+}
+
+%end
+
+%hook AWEKnowledgeGradientView
+
+- (void)layoutSubviews {
+    %orig;
+    DYFSSyncKnowledgeGradient(self);
+}
+
+%end
+
+%ctor {
+    gDYFSRichManagedViews = [NSHashTable weakObjectsHashTable];
+    DYFSRegisterRestoreHook(DYFSRestoreRichManaged);
+}
+
 #pragma mark - Native Douyin Settings fullscreen switch
 
 @interface AWESettingItemModel : NSObject
