@@ -1071,7 +1071,6 @@ static AWESettingItemModel *DYFSMakeGitHubItem(void) {
     item.title = @"https://github.com/xiaoye-debug/DY-FullScreen";
     item.subTitle = @"";
     item.detail = @"";
-    item.type = 0;
     item.svgIconImageName = @"ic_link_16";
     item.cellType = 26;
     item.colorStyle = 0;
