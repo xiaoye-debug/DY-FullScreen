@@ -1042,6 +1042,45 @@ static void DYFSSyncKnowledgeGradient(UIView *gradient) {
 @property(nonatomic,assign) NSInteger colorStyle;
 @end
 
+static void DYFSOpenGitHub(void) {
+    NSURL *url = [NSURL URLWithString:@"https://github.com/xiaoye-debug/DY-FullScreen"];
+    if (!url) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        UIWindow *window = DYFSActiveWindow();
+        UIViewController *vc = window.rootViewController;
+        while (vc.presentedViewController) vc = vc.presentedViewController;
+
+        if ([vc respondsToSelector:@selector(openURL:options:completionHandler:)]) {
+            [[UIApplication sharedApplication] openURL:url
+                                               options:@{}
+                                     completionHandler:nil];
+        } else {
+            [[UIApplication sharedApplication] openURL:url];
+        }
+    });
+}
+
+static AWESettingItemModel *DYFSMakeGitHubItem(void) {
+    Class itemClass = NSClassFromString(@"AWESettingItemModel");
+    if (!itemClass) return nil;
+
+    AWESettingItemModel *item = [itemClass new];
+    item.identifier = @"DYFSOpenSource";
+    item.title = @"开源地址";
+    item.subTitle = @"GitHub：xiaoye-debug/DY-FullScreen";
+    item.detail = @"";
+    item.svgIconImageName = @"ic_link_16";
+    item.cellType = 1;
+    item.colorStyle = 0;
+    item.isEnable = YES;
+    item.isSwitchOn = NO;
+    item.switchChangedBlock = ^{
+        DYFSOpenGitHub();
+    };
+    return item;
+}
+
 static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
     Class itemClass = NSClassFromString(@"AWESettingItemModel");
     if (!itemClass) return nil;
@@ -1100,15 +1139,16 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
     }
 
     AWESettingItemModel *item = DYFSMakeNativeFullscreenItem();
+    AWESettingItemModel *githubItem = DYFSMakeGitHubItem();
     Class sectionClass = NSClassFromString(@"AWESettingSectionModel");
     if (!item || !sectionClass) return sections;
 
     AWESettingSectionModel *section = [sectionClass new];
     section.sectionHeaderTitle = @"DY-FullScreen";
     section.sectionHeaderHeight = 40.0;
-    section.sectionFooterTitle = @"开源地址：https://github.com/xiaoye-debug/DY-FullScreen";
+    section.sectionFooterTitle = @"";
     section.type = 0;
-    section.itemArray = @[item];
+    section.itemArray = githubItem ? @[item, githubItem] : @[item];
 
     NSMutableArray *result = [sections mutableCopy];
     if (!result) result = [NSMutableArray array];
