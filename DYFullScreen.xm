@@ -1044,7 +1044,7 @@ static void DYFSSyncKnowledgeGradient(UIView *gradient) {
 @end
 
 static void DYFSOpenGitHub(void) {
-    NSURL *url = [NSURL URLWithString:@"https://github.com/xiaoye-debug/DY-FullScreen"];
+    NSURL *url = [NSURL URLWithString:@"https://github.com/xiaoye-debug/DY-FullScreen/blob/main/README.md"];
     if (!url) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1071,7 +1071,7 @@ static AWESettingItemModel *DYFSMakeGitHubItem(void) {
     item.title = @"v1.0 开源地址";
     item.subTitle = @"GitHub：xiaoye-debug/DY-FullScreen";
     item.detail = @"";
-    item.svgIconImageName = @"ic_link_16";
+    item.svgIconImageName = @"ic_github_16";
     item.cellType = 26;
     item.colorStyle = 0;
     item.isEnable = YES;
