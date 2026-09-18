@@ -1106,7 +1106,7 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
     AWESettingSectionModel *section = [sectionClass new];
     section.sectionHeaderTitle = @"DY-FullScreen";
     section.sectionHeaderHeight = 40.0;
-    section.sectionFooterTitle = @"关闭后全屏布局立即停止。";
+    section.sectionFooterTitle = @"开源地址：https://github.com/xiaoye-debug/DY-FullScreen";
     section.type = 0;
     section.itemArray = @[item];
 
