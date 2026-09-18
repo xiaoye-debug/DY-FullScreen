@@ -1072,7 +1072,7 @@ static AWESettingItemModel *DYFSMakeGitHubItem(void) {
     item.subTitle = @"";
     item.detail = @"";
     item.type = 0;
-    item.svgIconImageName = @"ic_gearsimplify_outlined_20";
+    item.svgIconImageName = @"ic_link_16";
     item.cellType = 26;
     item.colorStyle = 0;
     item.isEnable = YES;
