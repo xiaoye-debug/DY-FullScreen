@@ -203,14 +203,6 @@ static UIWindow *DYFSActiveWindow(void) {
 @property(nonatomic,strong) UIView *contentView;
 @end
 
-%hook AWEDPlayerViewController_Merge
-- (void)viewDidLayoutSubviews {
-    // Keep Douyin's original contentView geometry so the title/caption
-    // remains at its normal position in fullscreen.
-    %orig;
-}
-%end
-
 @interface AWEFeedDataSafeTableView : UITableView
 @end
 
