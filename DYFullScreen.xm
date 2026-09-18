@@ -169,7 +169,12 @@ static UIWindow *DYFSActiveWindow(void) {
 
     if (!DYFSIsEnabled()) return;
 
-    CGFloat original = DYFSFeedTableOriginalHeight(self.view);
+    UIView *table = self.view.superview;
+    NSNumber *originalNumber = nil;
+    if ([table isKindOfClass:NSClassFromString(@"AWEFeedDataSafeTableView")]) {
+        originalNumber = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
+    }
+    CGFloat original = originalNumber.doubleValue;
     if (original <= 0.0) return;
 
     CGRect frame = self.view.frame;
