@@ -1,0 +1,8 @@
+Package: com.xiaoye.dyfullscreen
+Name: DY-FullScreen
+Version: 1.0.0
+Architecture: iphoneos-arm64
+Description: Douyin standalone fullscreen tweak
+Maintainer: xiaoye-debug
+Section: Tweaks
+Depends: firmware (>= 15.0)
