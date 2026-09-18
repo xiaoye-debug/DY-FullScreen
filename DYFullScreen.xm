@@ -7,8 +7,14 @@
 
 #pragma mark - Standalone fullscreen state
 
+static NSString *const kDYFSFullScreenEnabledKey = @"DYFSFullScreenEnabled";
+
 BOOL DYFSIsEnabled(void) {
-    return YES;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if ([defaults objectForKey:kDYFSFullScreenEnabledKey] == nil) {
+        [defaults setBool:YES forKey:kDYFSFullScreenEnabledKey];
+    }
+    return [defaults boolForKey:kDYFSFullScreenEnabledKey];
 }
 
 static CGFloat gDYFSOriginalTabBarHeight = 0.0;
@@ -580,6 +586,107 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 }
 %end
 
+#pragma mark - Author profile bottom comment obstruction
+
+@interface AWECommentInputBackgroundView : UIView @end
+%hook AWECommentInputBackgroundView
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    if (DYFSIsAuthorProfileContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+    }
+}
+%end
+
+@interface CommentInputContainerView : UIView @end
+%hook CommentInputContainerView
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    if (DYFSIsAuthorProfileContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+    }
+}
+%end
+
+#pragma mark - Douyin Settings fullscreen switch
+
+static char kDYFSSettingsSwitchKey;
+
+static BOOL DYFSIsSettingsController(UIViewController *vc) {
+    if (!vc) return NO;
+    NSString *name = NSStringFromClass(vc.class);
+    return [name containsString:@"Setting"] || [name containsString:@"Settings"];
+}
+
+static void DYFSApplySettingsSwitch(UIViewController *vc) {
+    if (!vc || !DYFSIsSettingsController(vc)) return;
+    if (objc_getAssociatedObject(vc, &kDYFSSettingsSwitchKey)) return;
+
+    UIView *root = vc.view;
+    if (!root) return;
+
+    UIView *panel = [[UIView alloc] initWithFrame:CGRectZero];
+    panel.backgroundColor = [UIColor secondarySystemBackgroundColor];
+    panel.layer.cornerRadius = 12.0;
+    panel.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
+    label.text = @"视频全屏";
+    label.font = [UIFont systemFontOfSize:16.0];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+
+    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectZero];
+    sw.on = DYFSIsEnabled();
+    sw.translatesAutoresizingMaskIntoConstraints = NO;
+    [sw addTarget:vc action:@selector(dyfs_fullscreenSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+
+    [panel addSubview:label];
+    [panel addSubview:sw];
+    [root addSubview:panel];
+
+    UILayoutGuide *safe = root.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [panel.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:16.0],
+        [panel.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-16.0],
+        [panel.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16.0],
+        [panel.heightAnchor constraintEqualToConstant:54.0],
+        [label.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:16.0],
+        [label.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor],
+        [sw.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-12.0],
+        [sw.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor]
+    ]];
+
+    objc_setAssociatedObject(vc, &kDYFSSettingsSwitchKey, panel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+%hook UIViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    if (DYFSIsSettingsController(self)) {
+        DYFSApplySettingsSwitch(self);
+    }
+}
+%new
+- (void)dyfs_fullscreenSwitchChanged:(UISwitch *)sender {
+    [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:kDYFSFullScreenEnabledKey];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
+    UIWindow *window = DYFSActiveWindow();
+    if (window) {
+        [window setNeedsLayout];
+        [window layoutIfNeeded];
+    }
+}
+%end
+
 %ctor {
-    NSLog(@"[DY-FullScreen] loaded");
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    if ([defaults objectForKey:kDYFSFullScreenEnabledKey] == nil) {
+        [defaults setBool:YES forKey:kDYFSFullScreenEnabledKey];
+    }
+    NSLog(@"[DY-FullScreen] loaded, fullscreen=%@", DYFSIsEnabled() ? @"ON" : @"OFF");
 }
