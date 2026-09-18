@@ -760,8 +760,13 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
 
 #pragma mark - Fullscreen bottom backdrop
 
-static char kDYFSBackdropOriginalColorKey;
+// Search/detail pages can have a player background view whose color is the only
+// thing covering the area exposed when the player is pinned to the full cell.
+// Copy that actual background color to the first ancestor that exposes the
+// area below the player. This is the same strategy used by DYKiller.
+
 static char kDYFSBackdropAppliedKey;
+static char kDYFSCellBackdropKey;
 
 static UIView *DYFSBackdropCanvas(UIView *anchor) {
     UIView *content = DYFSCellContentView(anchor);
@@ -777,48 +782,76 @@ static UIView *DYFSBackdropCanvas(UIView *anchor) {
     return nil;
 }
 
-static void DYFSApplyBottomBackdrop(UIViewController *merge) {
-    if (!DYFSIsEnabled() || !merge) return;
+static void DYFSRestoreBackdrop(UIView *anchor, UIView *except) {
+    UIView *ancestor = anchor.superview;
+    for (NSUInteger i = 0; ancestor && i < 12; i++, ancestor = ancestor.superview) {
+        if (ancestor == except) continue;
 
-    UIView *anchor = merge.viewIfLoaded;
-    if (!anchor) return;
+        id baseline = objc_getAssociatedObject(ancestor, &kDYFSCellBackdropKey);
+        if (!baseline) continue;
 
-    UIView *canvas = DYFSBackdropCanvas(anchor);
-    if (!canvas) return;
+        ancestor.backgroundColor =
+            baseline == [NSNull null] ? nil : (UIColor *)baseline;
+        objc_setAssociatedObject(ancestor, &kDYFSCellBackdropKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+}
 
-    UIColor *original = objc_getAssociatedObject(canvas, &kDYFSBackdropOriginalColorKey);
-    if (!original) {
-        objc_setAssociatedObject(canvas, &kDYFSBackdropOriginalColorKey,
+static void DYFSApplyBackdrop(id owner, UIView *anchor, UIColor *color) {
+    BOOL applied = objc_getAssociatedObject(owner, &kDYFSBackdropAppliedKey) != nil;
+
+    if (!anchor || (!color && !applied)) return;
+
+    UIView *canvas = (color && DYFSIsEnabled()) ? DYFSBackdropCanvas(anchor) : nil;
+    DYFSRestoreBackdrop(anchor, canvas);
+
+    if (!canvas) {
+        objc_setAssociatedObject(owner, &kDYFSBackdropAppliedKey, nil,
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        return;
+    }
+
+    if (!objc_getAssociatedObject(canvas, &kDYFSCellBackdropKey)) {
+        objc_setAssociatedObject(canvas, &kDYFSCellBackdropKey,
                                  canvas.backgroundColor ?: (id)[NSNull null],
                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
 
-    // Search result cells expose the canvas below the video; keep it transparent so
-    // the video/background layer can occupy the full cell instead of leaving black.
-    if (canvas.backgroundColor && canvas.backgroundColor != UIColor.clearColor) {
-        canvas.backgroundColor = UIColor.clearColor;
+    if (![canvas.backgroundColor isEqual:color]) {
+        canvas.backgroundColor = color;
     }
-    objc_setAssociatedObject(canvas, &kDYFSBackdropAppliedKey, @YES,
+
+    objc_setAssociatedObject(owner, &kDYFSBackdropAppliedKey, @YES,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-static void DYFSRestoreBottomBackdrops(void) {
-    // Restore is intentionally handled by the next layout when fullscreen is off;
-    // no global strong references are needed here.
-}
+@interface AWEPlayVideoViewController : UIViewController
+@property(nonatomic,strong) UIView *playerBackgroundView;
+@end
 
-%hook AWEAwemeDetailTableView
-- (void)layoutSubviews {
-    %orig;
+%hook AWEPlayVideoViewController
+
+- (void)setPlayerBackgroundView:(UIView *)backgroundView {
+    %orig(backgroundView);
     if (!DYFSIsEnabled()) return;
-}
-%end
 
-%hook AWEDPlayerViewController_Merge
-- (void)viewDidAppear:(BOOL)animated {
-    %orig(animated);
-    if (DYFSIsEnabled()) DYFSApplyBottomBackdrop(self);
+    UIColor *color = backgroundView.superview && !backgroundView.hidden
+        ? backgroundView.backgroundColor : nil;
+    DYFSApplyBackdrop(self, self.viewIfLoaded, color);
 }
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+
+    if (!self.viewIfLoaded) return;
+
+    UIView *background = self.playerBackgroundView;
+    UIColor *color = (background.superview && !background.hidden)
+        ? background.backgroundColor : nil;
+
+    DYFSApplyBackdrop(self, self.viewIfLoaded, color);
+}
+
 %end
 
 #pragma mark - Native Douyin Settings fullscreen switch
