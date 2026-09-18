@@ -169,20 +169,21 @@ static UIWindow *DYFSActiveWindow(void) {
 
     if (!DYFSIsEnabled()) return;
 
-    UIView *table = self.view.superview;
-    NSNumber *originalNumber = nil;
-    if ([table isKindOfClass:NSClassFromString(@"AWEFeedDataSafeTableView")]) {
-        originalNumber = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
-    }
-    CGFloat original = originalNumber.doubleValue;
+    UIView *view = self.viewIfLoaded;
+    if (!view) return;
+
+    CGFloat original = DYFSFeedTableOriginalHeight(view);
     if (original <= 0.0) return;
 
-    CGRect frame = self.view.frame;
-    if (fabs(frame.origin.y) <= 0.5 && frame.size.height <= original + 0.5) return;
+    CGRect frame = view.frame;
+    if (fabs(frame.origin.y) <= 0.5 &&
+        frame.size.height <= original + 0.5) {
+        return;
+    }
 
     frame.origin.y = 0.0;
     frame.size.height = original;
-    self.view.frame = frame;
+    view.frame = frame;
 }
 
 %end
@@ -211,10 +212,6 @@ static void DYFSAdjustFeedTableFrame(UITableView *table, CGRect *frame) {
 
     UIView *parent = table.superview;
     CGFloat target = parent ? parent.bounds.size.height : 0.0;
-    UIWindow *window = table.window;
-    CGFloat screenHeight = window ? CGRectGetHeight(window.bounds) : CGRectGetHeight(UIScreen.mainScreen.bounds);
-    if (screenHeight > 0.0 && target > screenHeight) target = screenHeight;
-
     CGFloat current = frame->size.height;
 
     if (target <= 0.0 || current >= target - 0.5 || current < target * 0.5) return;
@@ -246,6 +243,11 @@ static CGFloat DYFSFeedTableOriginalHeight(UIView *view) {
     if (!table) return 0.0;
     NSNumber *n = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
     return n.doubleValue;
+}
+
+static NSNumber *DYFSFeedTableOriginalHeightNumber(UIView *view) {
+    UIView *table = DYFSFeedTableForView(view);
+    return table ? objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey) : nil;
 }
 
 static void DYFSRestoreFeedTables(void) {
@@ -680,10 +682,8 @@ static CGRect DYFSAdjustMergeFrame(UIView *view, CGRect frame) {
     CGFloat height = CGRectGetHeight(parent.bounds);
     if (width <= 0.0 || height <= 0.0) return CGRectNull;
 
-    if (DYFSIsEnabled() && DYFSCanFullscreenMerge(owner)) {
-        CGFloat full = DYFSFullCellHeightForView(view);
-        if (full > height) height = full;
-    }
+    CGFloat full = DYFSFullCellHeightForView(view);
+    if (full > height) height = full;
 
     CGRect target = CGRectMake(0.0, 0.0, width, height);
     if (fabs(frame.origin.x - target.origin.x) <= 0.5 &&
@@ -699,16 +699,16 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
     UIResponder *owner = view.nextResponder;
     if (![owner isKindOfClass:DYFSHUDClass()]) return CGRectNull;
 
-    UIView *table = DYFSFeedTableForView(view);
-    if (!table) return CGRectNull;
+    NSNumber *originalNumber = DYFSFeedTableOriginalHeightNumber(view);
+    if (!originalNumber) return CGRectNull;
 
-    NSNumber *originalNumber = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
     CGFloat original = originalNumber.doubleValue;
     if (original <= 0.0) return CGRectNull;
 
-    if (frame.size.height <= original + 0.5 && fabs(frame.origin.y) <= 0.5) return CGRectNull;
+    // Only suppress the stretched-height write. Smaller/normal frames are native
+    // states (comments, animations, reuse) and must pass through unchanged.
+    if (CGRectGetHeight(frame) <= original + 0.5) return CGRectNull;
 
-    frame.origin.y = 0.0;
     frame.size.height = original;
     return frame;
 }
@@ -717,8 +717,12 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
 - (void)willDisplay {
     %orig;
     if (!DYFSIsEnabled()) return;
+
+    // At willDisplay the reused cell has its final model and hierarchy.
+    // Recompute once after binding; this removes the alternating-cell effect.
     UIView *view = self.viewIfLoaded;
     if (!view) return;
+
     CGRect target = DYFSAdjustMergeFrame(view, view.frame);
     if (!CGRectIsNull(target)) view.frame = target;
 }
@@ -726,8 +730,10 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
 - (void)viewDidLayoutSubviews {
     %orig;
     if (!DYFSIsEnabled()) return;
+
     UIView *view = self.viewIfLoaded;
     if (!view) return;
+
     CGRect target = DYFSAdjustMergeFrame(view, view.frame);
     if (!CGRectIsNull(target)) view.frame = target;
 }
@@ -758,6 +764,26 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
 
 static char kDYFSBackdropAppliedKey;
 static char kDYFSCellBackdropKey;
+
+static Class DYFSRichContentContainerClass(void) {
+    static Class cls;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cls = NSClassFromString(@"RichContentContainerViewController");
+    });
+    return cls;
+}
+
+static BOOL DYFSIsUnderRichContent(UIViewController *controller) {
+    Class richCls = DYFSRichContentContainerClass();
+    if (!richCls) return NO;
+
+    for (NSUInteger i = 0; controller && i < 12; i++) {
+        if ([controller isKindOfClass:richCls]) return YES;
+        controller = controller.parentViewController;
+    }
+    return NO;
+}
 
 static UIView *DYFSBackdropCanvas(UIView *anchor) {
     UIView *content = DYFSCellContentView(anchor);
@@ -825,6 +851,7 @@ static void DYFSApplyBackdrop(id owner, UIView *anchor, UIColor *color) {
 - (void)setPlayerBackgroundView:(UIView *)backgroundView {
     %orig(backgroundView);
     if (!DYFSIsEnabled()) return;
+    if (DYFSIsUnderRichContent(self)) return;
 
     UIColor *color = backgroundView.superview && !backgroundView.hidden
         ? backgroundView.backgroundColor : nil;
@@ -835,6 +862,7 @@ static void DYFSApplyBackdrop(id owner, UIView *anchor, UIColor *color) {
     %orig;
 
     if (!self.viewIfLoaded) return;
+    if (DYFSIsUnderRichContent(self)) return;
 
     UIView *background = self.playerBackgroundView;
     UIColor *color = (background.superview && !background.hidden)
