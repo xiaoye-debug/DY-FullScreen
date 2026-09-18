@@ -636,11 +636,7 @@ static UIView *DYFSCellContentView(UIView *view) {
 
 static CGFloat DYFSFullCellHeightForView(UIView *view) {
     UIView *content = DYFSCellContentView(view ? view.superview : nil);
-    CGFloat h = content ? CGRectGetHeight(content.bounds) : 0.0;
-    UIWindow *window = view.window;
-    CGFloat screenH = window ? CGRectGetHeight(window.bounds) : CGRectGetHeight(UIScreen.mainScreen.bounds);
-    if (screenH > 0.0 && h > screenH) h = screenH;
-    return h;
+    return content ? CGRectGetHeight(content.bounds) : 0.0;
 }
 
 static BOOL DYFSCanFullscreenMerge(UIViewController *merge) {
@@ -693,12 +689,9 @@ static CGRect DYFSAdjustMergeFrame(UIView *view, CGRect frame) {
     CGFloat height = CGRectGetHeight(parent.bounds);
     if (width <= 0.0 || height <= 0.0) return CGRectNull;
 
-    CGFloat full = DYFSFullCellHeightForView(view);
-    if (full > height) height = full;
-
-    if (window) {
-        CGFloat screenH = CGRectGetHeight(window.bounds);
-        if (screenH > 0.0 && height > screenH) height = screenH;
+    if (DYFSIsEnabled() && DYFSCanFullscreenMerge(owner)) {
+        CGFloat full = DYFSFullCellHeightForView(view);
+        if (full > height) height = full;
     }
 
     CGRect target = CGRectMake(0.0, 0.0, width, height);
@@ -729,6 +722,26 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
     return frame;
 }
 
+%hook AWEDPlayerViewController_Merge
+- (void)willDisplay {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    UIView *view = self.viewIfLoaded;
+    if (!view) return;
+    CGRect target = DYFSAdjustMergeFrame(view, view.frame);
+    if (!CGRectIsNull(target)) view.frame = target;
+}
+
+- (void)viewDidLayoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    UIView *view = self.viewIfLoaded;
+    if (!view) return;
+    CGRect target = DYFSAdjustMergeFrame(view, view.frame);
+    if (!CGRectIsNull(target)) view.frame = target;
+}
+%end
+
 %hook UIView
 - (void)setFrame:(CGRect)frame {
     CGRect adjusted = DYFSAdjustMergeFrame(self, frame);
@@ -742,6 +755,69 @@ static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
         return;
     }
     %orig(frame);
+}
+%end
+
+#pragma mark - Fullscreen bottom backdrop
+
+static char kDYFSBackdropOriginalColorKey;
+static char kDYFSBackdropAppliedKey;
+
+static UIView *DYFSBackdropCanvas(UIView *anchor) {
+    UIView *content = DYFSCellContentView(anchor);
+    if (!content) return nil;
+
+    for (UIView *ancestor = anchor.superview; ancestor; ancestor = ancestor.superview) {
+        CGRect rect = [anchor convertRect:anchor.bounds toView:ancestor];
+        if (CGRectGetHeight(ancestor.bounds) > CGRectGetMaxY(rect) + 0.5) {
+            return ancestor;
+        }
+        if (ancestor == content) break;
+    }
+    return nil;
+}
+
+static void DYFSApplyBottomBackdrop(UIViewController *merge) {
+    if (!DYFSIsEnabled() || !merge) return;
+
+    UIView *anchor = merge.viewIfLoaded;
+    if (!anchor) return;
+
+    UIView *canvas = DYFSBackdropCanvas(anchor);
+    if (!canvas) return;
+
+    UIColor *original = objc_getAssociatedObject(canvas, &kDYFSBackdropOriginalColorKey);
+    if (!original) {
+        objc_setAssociatedObject(canvas, &kDYFSBackdropOriginalColorKey,
+                                 canvas.backgroundColor ?: (id)[NSNull null],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    // Search result cells expose the canvas below the video; keep it transparent so
+    // the video/background layer can occupy the full cell instead of leaving black.
+    if (canvas.backgroundColor && canvas.backgroundColor != UIColor.clearColor) {
+        canvas.backgroundColor = UIColor.clearColor;
+    }
+    objc_setAssociatedObject(canvas, &kDYFSBackdropAppliedKey, @YES,
+                             OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+static void DYFSRestoreBottomBackdrops(void) {
+    // Restore is intentionally handled by the next layout when fullscreen is off;
+    // no global strong references are needed here.
+}
+
+%hook AWEAwemeDetailTableView
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+}
+%end
+
+%hook AWEDPlayerViewController_Merge
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    if (DYFSIsEnabled()) DYFSApplyBottomBackdrop(self);
 }
 %end
 
