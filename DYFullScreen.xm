@@ -167,58 +167,17 @@ static UIWindow *DYFSActiveWindow(void) {
 - (void)viewDidLayoutSubviews {
     %orig;
 
-    UIWindow *window = DYFSActiveWindow();
-    if (window && window.safeAreaInsets.bottom == 0) return;
+    if (!DYFSIsEnabled()) return;
 
-    UIView *superview = self.view.superview;
-    if (!superview) return;
-
-    UIViewController *parent = self.parentViewController;
-    for (NSInteger i=0; parent && i<4; i++, parent=parent.parentViewController) {
-        if ([NSStringFromClass(parent.class) containsString:@"AFDPlayRemoteFeedTableViewController"]) return;
-    }
+    CGFloat original = DYFSFeedTableOriginalHeight(self.view);
+    if (original <= 0.0) return;
 
     CGRect frame = self.view.frame;
-    CGFloat screenWidth = UIScreen.mainScreen.bounds.size.width;
-    CGFloat parentHeight = superview.bounds.size.height;
-    if (frame.size.width != screenWidth && frame.size.height < parentHeight) return;
+    if (fabs(frame.origin.y) <= 0.5 && frame.size.height <= original + 0.5) return;
 
-    NSString *refer = self.referString;
-    BOOL isAuthorProfile = DYFSIsAuthorProfileContext(self.view);
-    BOOL fullHeight =
-        [refer isEqualToString:@"general_search"] ||
-        [refer isEqualToString:@"search_result"] ||
-        [refer isEqualToString:@"search_ecommerce"] ||
-        [refer isEqualToString:@"close_friends_moment"] ||
-        [refer isEqualToString:@"offline_mode"] ||
-        [refer isEqualToString:@"challenge"] ||
-        [refer isEqualToString:@"general_search_scan"] ||
-        refer == nil ||
-        isAuthorProfile;
-
-    if ([refer isEqualToString:@"co_play_watch"]) {
-        Class rich = NSClassFromString(@"AWEFriendsImpl.RichContentNewListViewController");
-        if (rich && [self.parentViewController isKindOfClass:rich]) fullHeight = YES;
-    }
-
-    if ([refer isEqualToString:@"chat"]) {
-        id model = self.model;
-        BOOL live = NO;
-        if ([model respondsToSelector:@selector(isLive)]) {
-            live = ((BOOL (*)(id, SEL))objc_msgSend)(model, @selector(isLive));
-        }
-        if (!live && [model respondsToSelector:@selector(cellRoom)]) {
-            live = (((id (*)(id, SEL))objc_msgSend)(model, @selector(cellRoom)) != nil);
-        }
-        if (!live && [model respondsToSelector:@selector(videoFeedTag)]) {
-            id tag = ((id (*)(id, SEL))objc_msgSend)(model, @selector(videoFeedTag));
-            live = [tag isKindOfClass:NSString.class] && [tag isEqualToString:@"直播中"];
-        }
-        if (!live) fullHeight = YES;
-    }
-
-    frame.size.height = fullHeight ? parentHeight : MAX(parentHeight - gDYFSCurrentTabBarHeight, 0);
-    if (fabs(frame.size.height - self.view.frame.size.height) > 0.5) self.view.frame = frame;
+    frame.origin.y = 0.0;
+    frame.size.height = original;
+    self.view.frame = frame;
 }
 
 %end
@@ -400,19 +359,7 @@ static void DYFSRestoreFeedTables(void) {
 
 %hook AWEAwemeDetailTableView
 - (void)setFrame:(CGRect)frame {
-    if (!DYFSIsEnabled()) {
-        %orig(frame);
-        return;
-    }
-    if (DYFSIsAuthorProfileContext(self)) {
-        %orig(frame);
-        return;
-    }
-    if (frame.size.height > 0) {
-        CGFloat screenH = UIScreen.mainScreen.bounds.size.height;
-        CGFloat remainder = fmod(frame.size.height, screenH);
-        if (remainder > 0.01) frame.size.height += screenH - remainder;
-    }
+    DYFSAdjustFeedTableFrame(self, &frame);
     %orig(frame);
 }
 %end
