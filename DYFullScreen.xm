@@ -18,6 +18,8 @@ static char kDYFSFeedTableOriginalGapKey;
 static char kDYFSFeedTableAppliedKey;
 static char kDYFSAuthorOriginalFrameKey;
 
+static BOOL DYFSShouldAdjustMetalView(UIView *view);
+
 static UIViewController *DYFSFirstViewControllerFromView(UIView *view) {
     if (!view) return nil;
     UIResponder *r = view;
@@ -406,8 +408,6 @@ static UIWindow *DYFSActiveWindow(void) {
 }
 %end
 
-static BOOL DYFSShouldAdjustMetalView(UIView *view);
-
 static BOOL DYFSShouldAdjustMetalView(UIView *view) {
     if (!view || !DYFSIsEnabled()) return NO;
     if (view.bounds.size.width + 0.5 < UIScreen.mainScreen.bounds.size.width) return NO;
@@ -416,7 +416,8 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
     if (!playClass || ![vc isKindOfClass:playClass]) return NO;
     id model = nil;
     @try { model = [vc valueForKey:@"model"]; } @catch (__unused NSException *e) {}
-    return [model respondsToSelector:@selector(isShowLandscapeEntryView)] && [model isShowLandscapeEntryView];
+    if (![model respondsToSelector:@selector(isShowLandscapeEntryView)]) return NO;
+    return ((BOOL (*)(id, SEL))objc_msgSend)(model, @selector(isShowLandscapeEntryView));
 }
 
 @interface AWEStoryProgressContainerView : UIView @end
