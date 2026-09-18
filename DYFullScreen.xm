@@ -214,6 +214,7 @@ static UIWindow *DYFSActiveWindow(void) {
 %hook AWEDPlayerFeedPlayerViewController
 - (void)viewDidLayoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     UIView *content = self.contentView;
     if (!content.superview) return;
     CGRect f = content.frame;
@@ -235,6 +236,7 @@ static UIWindow *DYFSActiveWindow(void) {
 %hook AWEDPlayerViewController_Merge
 - (void)viewDidLayoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     UIView *content = self.contentView;
     if (!content.superview) return;
     CGRect f = content.frame;
@@ -286,6 +288,7 @@ static UIWindow *DYFSActiveWindow(void) {
 %hook AWEStoryContainerCollectionView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     if (self.subviews.count == 2) return;
 
     id enableEnterProfile = nil;
@@ -337,6 +340,10 @@ static UIWindow *DYFSActiveWindow(void) {
 
 %hook AWEAwemeDetailTableView
 - (void)setFrame:(CGRect)frame {
+    if (!DYFSIsEnabled()) {
+        %orig(frame);
+        return;
+    }
     if (DYFSIsAuthorProfileContext(self)) {
         %orig(frame);
         return;
@@ -409,6 +416,7 @@ static void DYFSApplyLivePreviewLift(AWELivePreStream4LayerContainerView *contai
 %hook AWEPlayInteractionProgressContainerView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     for (UIView *v in self.subviews) if ([v isMemberOfClass:UIView.class]) v.backgroundColor = UIColor.clearColor;
 }
 %end
@@ -417,6 +425,7 @@ static void DYFSApplyLivePreviewLift(AWELivePreStream4LayerContainerView *contai
 %hook AWEDPlayerProgressContainerView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     for (UIView *v in self.subviews) {
         if (![v isMemberOfClass:UIView.class]) continue;
         UIColor *c=v.backgroundColor;
@@ -430,6 +439,7 @@ static void DYFSApplyLivePreviewLift(AWELivePreStream4LayerContainerView *contai
 %hook AFDFastSpeedView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     for (UIView *v in self.subviews) if ([v isMemberOfClass:UIView.class]) v.backgroundColor=UIColor.clearColor;
 }
 %end
@@ -440,6 +450,7 @@ static void DYFSApplyLivePreviewLift(AWELivePreStream4LayerContainerView *contai
 %hook AFDViewedBottomView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     self.backgroundColor=UIColor.clearColor;
     self.effectView.hidden=YES;
 }
@@ -486,6 +497,10 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 @interface AWEStoryProgressContainerView : UIView @end
 %hook AWEStoryProgressContainerView
 - (void)setCenter:(CGPoint)center {
+    if (!DYFSIsEnabled()) {
+        %orig(center);
+        return;
+    }
     UIViewController *vc=DYFSFirstViewControllerFromView(self);
     BOOL pure=[vc isKindOfClass:NSClassFromString(@"AWEFeedPlayControlImpl.PureModePageCellViewController")];
     NSString *version=NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"];
@@ -500,6 +515,10 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 @interface AWEMixVideoPanelMoreView : UIView @end
 %hook AWEMixVideoPanelMoreView
 - (void)setFrame:(CGRect)frame {
+    if (!DYFSIsEnabled()) {
+        %orig(frame);
+        return;
+    }
     CGFloat targetY=frame.origin.y-gDYFSCurrentTabBarHeight;
     CGFloat expected=UIScreen.mainScreen.bounds.size.height-gDYFSCurrentTabBarHeight;
     if (fabs(targetY-expected)<=10.0) frame.origin.y=targetY;
@@ -623,7 +642,7 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
     if (!itemClass) return nil;
 
     AWESettingItemModel *item = [itemClass new];
-    item.identifier = @"DYFSNativeFullScreen";
+    item.identifier = kDYFSFullScreenEnabledKey;
     item.title = @"视频全屏";
     item.subTitle = @"首页、朋友页、搜索页和他人作品铺满屏幕";
     item.detail = @"";
@@ -667,7 +686,7 @@ static AWESettingItemModel *DYFSMakeNativeFullscreenItem(void) {
         for (id item in items) {
             NSString *identifier = nil;
             @try { identifier = [item valueForKey:@"identifier"]; } @catch (__unused NSException *e) {}
-            if ([identifier isEqualToString:@"DYFSNativeFullScreen"]) return sections;
+            if ([identifier isEqualToString:kDYFSFullScreenEnabledKey] || [identifier isEqualToString:@"DYFSNativeFullScreen"]) return sections;
         }
     }
 
@@ -726,7 +745,13 @@ static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
     return %orig;
 }
 - (void)setBottomBarHidden:(BOOL)hidden {
-    if (DYFSIsEnabled() && DYFSIsAuthorWorkDetailContext(self.view)) {
+    NSString *refer = self.referString;
+    BOOL author = DYFSIsEnabled() && (DYFSIsAuthorWorkDetailContext(self.view) ||
+                  ([refer isKindOfClass:NSString.class] &&
+                   ([refer containsString:@"user"] ||
+                    [refer containsString:@"profile"] ||
+                    [refer containsString:@"personal"])));
+    if (author) {
         hidden = YES;
     }
     %orig(hidden);
