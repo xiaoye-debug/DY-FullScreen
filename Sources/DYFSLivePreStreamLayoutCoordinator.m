@@ -1,10 +1,41 @@
 #import <UIKit/UIKit.h>
 #import <Foundation/Foundation.h>
+#import <objc/runtime.h>
 
-BOOL DYFSIsEnabled(void);
-UIViewController *DYFSFirstViewControllerFromView(UIView *view);
-NSArray<UIView *> *DYFSFindAllSubviewsOfClass(Class cls, UIView *container);
-BOOL DYFSContainsSubviewOfClass(Class cls, UIView *container);
+static BOOL DYFSIsEnabled(void) {
+    return YES;
+}
+
+static UIViewController *DYFSFirstViewControllerFromView(UIView *view) {
+    if (!view) return nil;
+    UIResponder *r = view;
+    while ((r = [r nextResponder])) {
+        if ([r isKindOfClass:UIViewController.class]) return (UIViewController *)r;
+    }
+    return nil;
+}
+
+static NSArray<UIView *> *DYFSFindAllSubviewsOfClass(Class cls, UIView *container) {
+    if (!cls || !container) return @[];
+    NSMutableArray *result = [NSMutableArray array];
+    NSMutableArray *queue = [NSMutableArray arrayWithObject:container];
+    while (queue.count) {
+        UIView *view = queue.firstObject;
+        [queue removeObjectAtIndex:0];
+        if ([view isKindOfClass:cls] && view != container) [result addObject:view];
+        [queue addObjectsFromArray:view.subviews];
+    }
+    return result;
+}
+
+static BOOL DYFSContainsSubviewOfClass(Class cls, UIView *container) {
+    if (!cls || !container) return NO;
+    if ([container isKindOfClass:cls]) return YES;
+    for (UIView *sub in container.subviews) {
+        if (DYFSContainsSubviewOfClass(cls, sub)) return YES;
+    }
+    return NO;
+}
 
 #import "DYFSLivePreStreamLayoutCoordinator.h"
 
