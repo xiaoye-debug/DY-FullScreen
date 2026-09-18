@@ -219,6 +219,10 @@ static void DYFSAdjustFeedTableFrame(UITableView *table, CGRect *frame) {
 
     UIView *parent = table.superview;
     CGFloat target = parent ? parent.bounds.size.height : 0.0;
+    UIWindow *window = table.window;
+    CGFloat screenHeight = window ? CGRectGetHeight(window.bounds) : CGRectGetHeight(UIScreen.mainScreen.bounds);
+    if (screenHeight > 0.0 && target > screenHeight) target = screenHeight;
+
     CGFloat current = frame->size.height;
 
     if (target <= 0.0 || current >= target - 0.5 || current < target * 0.5) return;
@@ -601,24 +605,124 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 }
 %end
 
-#pragma mark - Global HUD frame guard
+#pragma mark - Global video geometry guard
 
-// Douyin 40.4.0 can write the interaction HUD frame again after
-// viewDidLayoutSubviews. Clamp that write at the source so the title/caption
-// cannot be pushed downward by a later layout pass.
-static CGRect DYFSAdjustGlobalHUDFrame(UIView *view, CGRect frame) {
+// 40.4.0 writes the actual video container and the interaction HUD through
+// UIView setFrame:. Intercept the write itself so search-page extra content
+// cannot move the video down or leave a black strip below it.
+
+static Class DYFSMergeClass(void) {
+    static Class cls;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cls = NSClassFromString(@"AWEDPlayerViewController_Merge"); });
+    return cls;
+}
+
+static Class DYFSHUDClass(void) {
+    static Class cls;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cls = NSClassFromString(@"AWEPlayInteractionViewController"); });
+    return cls;
+}
+
+static UIView *DYFSCellContentView(UIView *view) {
+    Class cls = NSClassFromString(@"UITableViewCellContentView");
+    if (!cls) return nil;
+    for (NSUInteger i = 0; view && i < 12; i++, view = view.superview) {
+        if ([view isKindOfClass:cls]) return view;
+    }
+    return nil;
+}
+
+static CGFloat DYFSFullCellHeightForView(UIView *view) {
+    UIView *content = DYFSCellContentView(view ? view.superview : nil);
+    CGFloat h = content ? CGRectGetHeight(content.bounds) : 0.0;
+    UIWindow *window = view.window;
+    CGFloat screenH = window ? CGRectGetHeight(window.bounds) : CGRectGetHeight(UIScreen.mainScreen.bounds);
+    if (screenH > 0.0 && h > screenH) h = screenH;
+    return h;
+}
+
+static BOOL DYFSCanFullscreenMerge(UIViewController *merge) {
+    if (!merge || ![merge isKindOfClass:DYFSMergeClass()]) return NO;
+
+    id model = nil;
+    @try { model = [merge valueForKey:@"model"]; } @catch (__unused NSException *e) {}
+
+    NSNumber *type = nil;
+    @try { type = [model valueForKey:@"awemeType"]; } @catch (__unused NSException *e) {}
+    if (type && type.longLongValue == 68) return NO;
+
+    NSNumber *landscape = nil;
+    @try { landscape = [merge valueForKey:@"hasInlandscape"]; } @catch (__unused NSException *e) {}
+    if (landscape.boolValue) return NO;
+
+    if ([merge respondsToSelector:@selector(isInLandscapeFeedStatus)]) {
+        BOOL inLandscape = NO;
+        @try { inLandscape = ((BOOL (*)(id, SEL))objc_msgSend)(merge, @selector(isInLandscapeFeedStatus)); }
+        @catch (__unused NSException *e) {}
+        if (inLandscape) return NO;
+    }
+
+    id video = nil;
+    @try { video = [model valueForKey:@"video"]; } @catch (__unused NSException *e) {}
+    NSNumber *w = nil;
+    NSNumber *h = nil;
+    @try { w = [video valueForKey:@"width"]; h = [video valueForKey:@"height"]; }
+    @catch (__unused NSException *e) {}
+
+    double width = w.doubleValue;
+    double height = h.doubleValue;
+    return width <= 0.0 || height <= 0.0 || (height / width) >= 1.70;
+}
+
+static CGRect DYFSAdjustMergeFrame(UIView *view, CGRect frame) {
     if (!DYFSIsEnabled() || !view) return CGRectNull;
 
-    Class hudClass = NSClassFromString(@"AWEPlayInteractionViewController");
-    if (!hudClass || ![view.nextResponder isKindOfClass:hudClass]) return CGRectNull;
+    UIWindow *window = view.window;
+    if (window && window.windowLevel != UIWindowLevelNormal) return CGRectNull;
+
+    UIViewController *owner = (UIViewController *)view.nextResponder;
+    if (![owner isKindOfClass:DYFSMergeClass()]) return CGRectNull;
+    if (!DYFSCanFullscreenMerge(owner)) return CGRectNull;
+
+    UIView *parent = view.superview;
+    if (!parent) return CGRectNull;
+
+    CGFloat width = CGRectGetWidth(parent.bounds);
+    CGFloat height = CGRectGetHeight(parent.bounds);
+    if (width <= 0.0 || height <= 0.0) return CGRectNull;
+
+    CGFloat full = DYFSFullCellHeightForView(view);
+    if (full > height) height = full;
+
+    if (window) {
+        CGFloat screenH = CGRectGetHeight(window.bounds);
+        if (screenH > 0.0 && height > screenH) height = screenH;
+    }
+
+    CGRect target = CGRectMake(0.0, 0.0, width, height);
+    if (fabs(frame.origin.x - target.origin.x) <= 0.5 &&
+        fabs(frame.origin.y - target.origin.y) <= 0.5 &&
+        fabs(frame.size.width - target.size.width) <= 0.5 &&
+        fabs(frame.size.height - target.size.height) <= 0.5) return CGRectNull;
+    return target;
+}
+
+static CGRect DYFSAdjustHUDFrame(UIView *view, CGRect frame) {
+    if (!DYFSIsEnabled() || !view) return CGRectNull;
+
+    UIResponder *owner = view.nextResponder;
+    if (![owner isKindOfClass:DYFSHUDClass()]) return CGRectNull;
 
     UIView *table = DYFSFeedTableForView(view);
     if (!table) return CGRectNull;
 
-    NSNumber *originalNumber =
-        objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
+    NSNumber *originalNumber = objc_getAssociatedObject(table, &kDYFSFeedTableOriginalHeightKey);
     CGFloat original = originalNumber.doubleValue;
-    if (original <= 0.0 || frame.size.height <= original + 0.5) return CGRectNull;
+    if (original <= 0.0) return CGRectNull;
+
+    if (frame.size.height <= original + 0.5 && fabs(frame.origin.y) <= 0.5) return CGRectNull;
 
     frame.origin.y = 0.0;
     frame.size.height = original;
@@ -627,7 +731,12 @@ static CGRect DYFSAdjustGlobalHUDFrame(UIView *view, CGRect frame) {
 
 %hook UIView
 - (void)setFrame:(CGRect)frame {
-    CGRect adjusted = DYFSAdjustGlobalHUDFrame(self, frame);
+    CGRect adjusted = DYFSAdjustMergeFrame(self, frame);
+    if (!CGRectIsNull(adjusted)) {
+        %orig(adjusted);
+        return;
+    }
+    adjusted = DYFSAdjustHUDFrame(self, frame);
     if (!CGRectIsNull(adjusted)) {
         %orig(adjusted);
         return;
