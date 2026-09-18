@@ -159,6 +159,9 @@ static UIWindow *DYFSActiveWindow(void) {
     if (frame.size.width != screenWidth && frame.size.height < parentHeight) return;
 
     NSString *refer = self.referString;
+    // 作品主页不能改 FeedTable 的分页高度，否则会破坏上下 Cell；
+    // 但当前正在播放的作品视频容器本身仍然必须占满父容器。
+    BOOL isAuthorProfile = DYFSIsAuthorProfileContext(self.view);
     BOOL fullHeight =
         [refer isEqualToString:@"general_search"] ||
         [refer isEqualToString:@"search_result"] ||
@@ -167,7 +170,8 @@ static UIWindow *DYFSActiveWindow(void) {
         [refer isEqualToString:@"offline_mode"] ||
         [refer isEqualToString:@"challenge"] ||
         [refer isEqualToString:@"general_search_scan"] ||
-        refer == nil;
+        refer == nil ||
+        isAuthorProfile;
 
     if ([refer isEqualToString:@"co_play_watch"]) {
         Class rich = NSClassFromString(@"AWEFriendsImpl.RichContentNewListViewController");
@@ -338,6 +342,83 @@ static UIWindow *DYFSActiveWindow(void) {
     }
     %orig(frame);
 }
+%end
+
+
+#pragma mark - Home live title / status label
+
+@interface AWELiveFeedStatusLabel : UIView
+@end
+
+%hook AWELiveFeedStatusLabel
+
+- (void)layoutSubviews {
+    %orig;
+
+    static char kDYFSBaseTransformKey;
+    if (!self.window || self.hidden || self.alpha <= 0.01) return;
+
+    UIWindow *window = self.window;
+    Class tabBarClass = NSClassFromString(@"AWENormalModeTabBar");
+    UIView *tabBar = nil;
+
+    if (tabBarClass) {
+        NSArray *bars = DYFSFindAllSubviewsOfClass(tabBarClass, window);
+        for (UIView *candidate in bars) {
+            if (candidate.hidden || candidate.alpha <= 0.01) continue;
+            CGRect rect = [candidate convertRect:candidate.bounds toView:window];
+            if (CGRectGetMidY(rect) >= CGRectGetMidY(window.bounds) &&
+                CGRectGetHeight(CGRectIntersection(rect, window.bounds)) > 1.0) {
+                tabBar = candidate;
+                break;
+            }
+        }
+    }
+
+    if (!tabBar) return;
+
+    UIViewController *vc = DYFSFirstViewControllerFromView(self);
+    BOOL inPlayInteraction = NO;
+    UIResponder *responder = self;
+    NSInteger depth = 0;
+    while ((responder = [responder nextResponder]) && depth++ < 20) {
+        NSString *name = NSStringFromClass([responder class]);
+        if ([name isEqualToString:@"AWEPlayInteractionViewController"]) {
+            inPlayInteraction = YES;
+            break;
+        }
+    }
+
+    if (!inPlayInteraction && ![vc isKindOfClass:NSClassFromString(@"AWEFeedTableViewController")]) {
+        return;
+    }
+
+    CGRect labelRect = [self convertRect:self.bounds toView:window];
+    CGRect tabRect = [tabBar convertRect:tabBar.bounds toView:window];
+    CGFloat overlap = CGRectGetMaxY(labelRect) - CGRectGetMinY(tabRect);
+
+    CGAffineTransform baseTransform = CGAffineTransformIdentity;
+    NSValue *stored = objc_getAssociatedObject(self, &kDYFSBaseTransformKey);
+    if (stored) {
+        baseTransform = stored.CGAffineTransformValue;
+    } else {
+        baseTransform = self.transform;
+        objc_setAssociatedObject(self, &kDYFSBaseTransformKey,
+                                 [NSValue valueWithCGAffineTransform:baseTransform],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    if (overlap > 0.0) {
+        CGFloat offset = MIN(overlap + 6.0, CGRectGetHeight(window.bounds) * 0.20);
+        CGAffineTransform adjusted = CGAffineTransformTranslate(baseTransform, 0.0, -offset);
+        if (!CGAffineTransformEqualToTransform(self.transform, adjusted)) {
+            self.transform = adjusted;
+        }
+    } else if (!CGAffineTransformEqualToTransform(self.transform, baseTransform)) {
+        self.transform = baseTransform;
+    }
+}
+
 %end
 
 #pragma mark - Visual cleanup needed by fullscreen
