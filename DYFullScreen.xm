@@ -7,7 +7,7 @@
 
 #pragma mark - Standalone fullscreen state
 
-static NSString *const kDYFSFullScreenEnabledKey = @"DYFSFullScreenEnabled";
+static NSString *const kDYFSFullScreenEnabledKey = @"DYYYEnableFullScreen";
 
 BOOL DYFSIsEnabled(void) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -616,73 +616,261 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 }
 %end
 
-#pragma mark - Douyin Settings fullscreen switch
+#pragma mark - Native Douyin Settings fullscreen switch
 
-static char kDYFSSettingsSwitchKey;
+@interface AWESettingItemModel : NSObject
+@property(nonatomic,copy) NSString *identifier;
+@property(nonatomic,copy) NSString *title;
+@property(nonatomic,copy) NSString *subTitle;
+@property(nonatomic,copy) NSString *detail;
+@property(nonatomic,copy) NSString *svgIconImageName;
+@property(nonatomic,assign) NSInteger cellType;
+@property(nonatomic,assign) NSInteger colorStyle;
+@property(nonatomic,assign) BOOL isEnable;
+@property(nonatomic,assign) BOOL isSwitchOn;
+@property(nonatomic,copy) void (^switchChangedBlock)(void);
+- (void)refreshCell;
+@end
 
-static BOOL DYFSIsSettingsController(UIViewController *vc) {
-    if (!vc) return NO;
-    NSString *name = NSStringFromClass(vc.class);
-    return [name containsString:@"Setting"] || [name containsString:@"Settings"];
-}
+@interface AWESettingSectionModel : NSObject
+@property(nonatomic,copy) NSString *sectionHeaderTitle;
+@property(nonatomic,assign) CGFloat sectionHeaderHeight;
+@property(nonatomic,copy) NSString *sectionFooterTitle;
+@property(nonatomic,assign) NSInteger type;
+@property(nonatomic,strong) NSArray *itemArray;
+@end
 
-static void DYFSApplySettingsSwitch(UIViewController *vc) {
-    if (!vc || !DYFSIsSettingsController(vc)) return;
-    if (objc_getAssociatedObject(vc, &kDYFSSettingsSwitchKey)) return;
+@interface AWESettingsViewModel : NSObject
+@property(nonatomic,strong) NSArray *sectionDataArray;
+@property(nonatomic,assign) NSInteger colorStyle;
+@end
 
-    UIView *root = vc.view;
-    if (!root) return;
+@interface AWESettingBaseViewController : UIViewController
+- (AWESettingsViewModel *)viewModel;
+@end
 
-    UIView *panel = [[UIView alloc] initWithFrame:CGRectZero];
-    panel.backgroundColor = [UIColor secondarySystemBackgroundColor];
-    panel.layer.cornerRadius = 12.0;
-    panel.translatesAutoresizingMaskIntoConstraints = NO;
+static char kDYFSNativeSettingInstalledKey;
 
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectZero];
-    label.text = @"视频全屏";
-    label.font = [UIFont systemFontOfSize:16.0];
-    label.translatesAutoresizingMaskIntoConstraints = NO;
+static void DYFSInstallNativeSetting(UIViewController *vc) {
+    if (!vc || ![vc isKindOfClass:NSClassFromString(@"AWESettingBaseViewController")]) return;
 
-    UISwitch *sw = [[UISwitch alloc] initWithFrame:CGRectZero];
-    sw.on = DYFSIsEnabled();
-    sw.translatesAutoresizingMaskIntoConstraints = NO;
-    [sw addTarget:vc action:@selector(dyfs_fullscreenSwitchChanged:) forControlEvents:UIControlEventValueChanged];
+    AWESettingsViewModel *vm = nil;
+    @try { vm = [vc viewModel]; } @catch (__unused NSException *e) {}
+    if (!vm) return;
 
-    [panel addSubview:label];
-    [panel addSubview:sw];
-    [root addSubview:panel];
+    NSArray *sections = vm.sectionDataArray;
+    if (![sections isKindOfClass:NSArray.class]) return;
 
-    UILayoutGuide *safe = root.safeAreaLayoutGuide;
-    [NSLayoutConstraint activateConstraints:@[
-        [panel.leadingAnchor constraintEqualToAnchor:root.leadingAnchor constant:16.0],
-        [panel.trailingAnchor constraintEqualToAnchor:root.trailingAnchor constant:-16.0],
-        [panel.bottomAnchor constraintEqualToAnchor:safe.bottomAnchor constant:-16.0],
-        [panel.heightAnchor constraintEqualToConstant:54.0],
-        [label.leadingAnchor constraintEqualToAnchor:panel.leadingAnchor constant:16.0],
-        [label.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor],
-        [sw.trailingAnchor constraintEqualToAnchor:panel.trailingAnchor constant:-12.0],
-        [sw.centerYAnchor constraintEqualToAnchor:panel.centerYAnchor]
-    ]];
+    for (id section in sections) {
+        NSArray *items = nil;
+        @try { items = [section valueForKey:@"itemArray"]; } @catch (__unused NSException *e) {}
+        for (id item in items) {
+            NSString *identifier = nil;
+            @try { identifier = [item valueForKey:@"identifier"]; } @catch (__unused NSException *e) {}
+            if ([identifier isEqualToString:@"DYFSNativeFullScreen"]) return;
+        }
+    }
 
-    objc_setAssociatedObject(vc, &kDYFSSettingsSwitchKey, panel, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-}
+    AWESettingItemModel *item = [NSClassFromString(@"AWESettingItemModel") new];
+    item.identifier = @"DYFSNativeFullScreen";
+    item.title = @"启用首页全屏";
+    item.subTitle = @"视频扩展到屏幕底部，隐藏底栏遮挡";
+    item.detail = @"";
+    item.svgIconImageName = @"ic_fullscreen_outlined_16";
+    item.cellType = 6;
+    item.colorStyle = 0;
+    item.isEnable = YES;
+    item.isSwitchOn = DYFSIsEnabled();
 
-%hook UIViewController
-- (void)viewDidAppear:(BOOL)animated {
-    %orig(animated);
-    if (DYFSIsSettingsController(self)) {
-        DYFSApplySettingsSwitch(self);
+    __weak AWESettingItemModel *weakItem = item;
+    item.switchChangedBlock = ^{
+        AWESettingItemModel *strongItem = weakItem;
+        if (!strongItem) return;
+        BOOL enabled = !strongItem.isSwitchOn;
+        strongItem.isSwitchOn = enabled;
+        [[NSUserDefaults standardUserDefaults] setBool:enabled forKey:kDYFSFullScreenEnabledKey];
+        [[NSUserDefaults standardUserDefaults] synchronize];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [vc.view setNeedsLayout];
+            [vc.view layoutIfNeeded];
+        });
+    };
+
+    AWESettingSectionModel *section = [NSClassFromString(@"AWESettingSectionModel") new];
+    section.sectionHeaderTitle = @"DY-FullScreen";
+    section.sectionHeaderHeight = 40.0;
+    section.sectionFooterTitle = @"关闭后本插件的全屏布局不会生效。";
+    section.type = 0;
+    section.itemArray = @[item];
+
+    NSMutableArray *newSections = [sections mutableCopy];
+    [newSections addObject:section];
+    vm.sectionDataArray = [newSections copy];
+    objc_setAssociatedObject(vc, &kDYFSNativeSettingInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    if ([vc.view respondsToSelector:@selector(setNeedsLayout)]) {
+        [vc.view setNeedsLayout];
     }
 }
-%new
-- (void)dyfs_fullscreenSwitchChanged:(UISwitch *)sender {
-    [[NSUserDefaults standardUserDefaults] setBool:sender.isOn forKey:kDYFSFullScreenEnabledKey];
-    [[NSUserDefaults standardUserDefaults] synchronize];
 
-    UIWindow *window = DYFSActiveWindow();
-    if (window) {
-        [window setNeedsLayout];
-        [window layoutIfNeeded];
+%hook AWESettingBaseViewController
+- (void)viewDidAppear:(BOOL)animated {
+    %orig(animated);
+    dispatch_async(dispatch_get_main_queue(), ^{
+        DYFSInstallNativeSetting(self);
+    });
+}
+%end
+
+#pragma mark - Direct live preview title / copy layout
+
+static void DYFSShiftLivePreviewStack(UIView *stack) {
+    if (!stack || !DYFSIsEnabled()) return;
+
+    UIViewController *vc = DYFSFirstViewControllerFromView(stack);
+    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
+
+    Class guideClass = NSClassFromString(@"AWELivePrestreamGuideView");
+    Class tagClass = NSClassFromString(@"AWELiveFeedLabelTagView");
+    Class statusClass = NSClassFromString(@"AWELiveFeedStatusLabel");
+
+    BOOL hasGuide = guideClass && DYFSContainsSubviewOfClass(guideClass, stack);
+    BOOL hasTag = tagClass && DYFSContainsSubviewOfClass(tagClass, stack);
+    BOOL hasStatus = statusClass && DYFSContainsSubviewOfClass(statusClass, stack);
+
+    if (!hasGuide && !hasTag && !hasStatus) return;
+
+    UIWindow *window = stack.window;
+    CGFloat shift = gDYFSCurrentTabBarHeight;
+    if (window && window.safeAreaInsets.bottom == 0.0) {
+        shift = MAX(0.0, gDYFSCurrentTabBarHeight - gDYFSOriginalTabBarHeight);
+    }
+    if (shift <= 0.0) return;
+
+    static char kDYFSLiveBaseTransformKey;
+    NSValue *base = objc_getAssociatedObject(stack, &kDYFSLiveBaseTransformKey);
+    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : stack.transform;
+    if (!base) {
+        objc_setAssociatedObject(stack, &kDYFSLiveBaseTransformKey,
+                                 [NSValue valueWithCGAffineTransform:baseTransform],
+                                 OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    CGFloat scale = 1.0;
+    if (hasGuide || hasTag || hasStatus) {
+        NSString *scaleString = [[NSUserDefaults standardUserDefaults] objectForKey:@"DYYYNicknameScale"];
+        CGFloat v = [scaleString floatValue];
+        if (v > 0.01) scale = v;
+    }
+
+    CGFloat ty = -shift;
+    NSArray *subs = [stack.subviews copy];
+    for (UIView *v in subs) {
+        CGFloat h = v.bounds.size.height;
+        ty += (h - h * scale) * 0.5;
+    }
+
+    CGAffineTransform t = CGAffineTransformConcat(baseTransform,
+        CGAffineTransformMake(scale, 0, 0, scale, 0, ty));
+    if (!CGAffineTransformEqualToTransform(stack.transform, t)) {
+        stack.transform = t;
+    }
+}
+
+@interface AWEElementStackView : UIView @end
+%hook AWEElementStackView
+- (void)layoutSubviews {
+    %orig;
+    DYFSShiftLivePreviewStack(self);
+}
+%end
+
+@interface IESLiveStackView : UIView @end
+%hook IESLiveStackView
+- (void)layoutSubviews {
+    %orig;
+    DYFSShiftLivePreviewStack(self);
+}
+%end
+
+@interface AWELiveFeedStatusLabel : UILabel @end
+%hook AWELiveFeedStatusLabel
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    UIViewController *vc = DYFSFirstViewControllerFromView(self);
+    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
+
+    static char kDYFSStatusBaseTransformKey;
+    NSValue *base = objc_getAssociatedObject(self, &kDYFSStatusBaseTransformKey);
+    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
+    if (!base) objc_setAssociatedObject(self, &kDYFSStatusBaseTransformKey,
+                                        [NSValue valueWithCGAffineTransform:baseTransform],
+                                        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    CGFloat shift = gDYFSCurrentTabBarHeight;
+    if (shift > 0.0) {
+        self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
+    }
+}
+%end
+
+@interface AWELiveFeedLabelTagView : UIView @end
+%hook AWELiveFeedLabelTagView
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    UIViewController *vc = DYFSFirstViewControllerFromView(self);
+    if (![vc isKindOfClass:NSClassFromString(@"AWELiveNewPreStreamViewController")]) return;
+
+    static char kDYFSTagBaseTransformKey;
+    NSValue *base = objc_getAssociatedObject(self, &kDYFSTagBaseTransformKey);
+    CGAffineTransform baseTransform = base ? base.CGAffineTransformValue : self.transform;
+    if (!base) objc_setAssociatedObject(self, &kDYFSTagBaseTransformKey,
+                                        [NSValue valueWithCGAffineTransform:baseTransform],
+                                        OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+
+    CGFloat shift = gDYFSCurrentTabBarHeight;
+    if (shift > 0.0) self.transform = CGAffineTransformTranslate(baseTransform, 0, -shift);
+}
+%end
+
+#pragma mark - Author profile comment bar removal
+
+static BOOL DYFSIsAuthorWorkDetailContext(UIView *view) {
+    if (!view) return NO;
+    UIResponder *r = view;
+    NSInteger depth = 0;
+    while ((r = [r nextResponder]) && depth++ < 30) {
+        NSString *name = NSStringFromClass(r.class);
+        if ([name containsString:@"UserHome"] ||
+            [name containsString:@"UserProfile"] ||
+            [name containsString:@"ProfileViewController"] ||
+            [name isEqualToString:@"AWEAwemeDetailCellViewController"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+%hook CommentInputContainerView
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    if (DYFSIsAuthorWorkDetailContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+    }
+}
+%end
+
+%hook AWECommentInputBackgroundView
+- (void)layoutSubviews {
+    %orig;
+    if (!DYFSIsEnabled()) return;
+    if (DYFSIsAuthorWorkDetailContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
     }
 }
 %end
