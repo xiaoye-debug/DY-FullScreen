@@ -854,7 +854,7 @@ static void DYFSApplyBackdrop(id owner, UIView *anchor, UIColor *color) {
 @interface AWEKnowledgeGradientView : UIView
 @end
 
-@interface AWEStoryContainerCollectionView : UICollectionView
+@interface AWEStoryContainerCollectionView : UIView
 @end
 
 static char kDYFSRichClipKey;
