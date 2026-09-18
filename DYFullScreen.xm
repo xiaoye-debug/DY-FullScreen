@@ -1044,7 +1044,7 @@ static void DYFSSyncKnowledgeGradient(UIView *gradient) {
 @end
 
 static void DYFSOpenGitHub(void) {
-    NSURL *url = [NSURL URLWithString:@"https://github.com/xiaoye-debug/DY-FullScreen/blob/main/README.md"];
+    NSURL *url = [NSURL URLWithString:@"https://github.com/xiaoye-debug/DY-FullScreen"];
     if (!url) return;
 
     dispatch_async(dispatch_get_main_queue(), ^{
@@ -1052,12 +1052,11 @@ static void DYFSOpenGitHub(void) {
         UIViewController *vc = window.rootViewController;
         while (vc.presentedViewController) vc = vc.presentedViewController;
 
-        if ([vc respondsToSelector:@selector(openURL:options:completionHandler:)]) {
-            [[UIApplication sharedApplication] openURL:url
-                                               options:@{}
-                                     completionHandler:nil];
-        } else {
-            [[UIApplication sharedApplication] openURL:url];
+        UIApplication *app = UIApplication.sharedApplication;
+        if ([app canOpenURL:url]) {
+            [app openURL:url options:@{} completionHandler:^(BOOL success) {
+                NSLog(@"[DY-FullScreen] GitHub openURL success=%@", success ? @"YES" : @"NO");
+            }];
         }
     });
 }
@@ -1071,7 +1070,7 @@ static AWESettingItemModel *DYFSMakeGitHubItem(void) {
     item.title = @"https://github.com/xiaoye-debug/DY-FullScreen";
     item.subTitle = @"";
     item.detail = @"";
-    item.svgIconImageName = @"ic_link_16";
+    item.svgIconImageName = @"ic_share_outlined";
     item.cellType = 26;
     item.colorStyle = 0;
     item.isEnable = YES;
