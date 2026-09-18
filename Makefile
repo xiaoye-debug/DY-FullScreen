@@ -7,8 +7,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME := DYFullScreen
 DYFullScreen_FILES := DYFullScreen.xm Sources/DYFSLivePreStreamLayoutCoordinator.m
-DYFullScreen_CFLAGS := -fobjc-arc -w
+DYFullScreen_CFLAGS := -fobjc-arc -w -ISources
 DYFullScreen_FRAMEWORKS := UIKit Foundation QuartzCore
-DYFullScreen_LDFLAGS :=
 
 include $(THEOS_MAKE_PATH)/tweak.mk
