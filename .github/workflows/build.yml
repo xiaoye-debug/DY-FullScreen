@@ -1,0 +1,42 @@
+name: Build DY-FullScreen
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          brew install ldid dpkg
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$HOME/theos"
+
+      - name: Build rootless package
+        run: |
+          export THEOS="$HOME/theos"
+          export THEOS_PACKAGE_SCHEME=rootless
+          make clean package FINALPACKAGE=1
+
+      - name: Collect package
+        run: |
+          mkdir -p artifacts
+          find packages -type f -name "*.deb" -exec cp {} artifacts/ \;
+          ls -lah artifacts
+
+      - name: Upload DEB
+        uses: actions/upload-artifact@v4
+        with:
+          name: DY-FullScreen-deb
+          path: artifacts/*.deb
+          if-no-files-found: error
