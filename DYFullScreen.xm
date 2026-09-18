@@ -539,6 +539,12 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 %hook CommentInputContainerView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
+    if (DYFSIsAuthorProfileContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+        return;
+    }
     UIViewController *parent=nil;
     if ([self respondsToSelector:@selector(viewController)]) {
         id vc=[self performSelector:@selector(viewController)];
@@ -561,6 +567,7 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 %hook AWEIMFeedBottomQuickEmojiInputBar
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
     UIView *p=self.superview;
     while (p && ![NSStringFromClass(p.class) isEqualToString:@"UIView"]) p=p.superview;
     if (p) { p.backgroundColor=UIColor.clearColor; p.layer.backgroundColor=UIColor.clearColor.CGColor; p.opaque=NO; }
@@ -571,9 +578,24 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 %hook AWEConcernCellLastView
 - (void)layoutSubviews {
     %orig;
-    if (gDYFSCurrentTabBarHeight<=0) return;
-    for (UIView *v in self.subviews) {
-        CGRect f=v.frame; f.origin.y-=gDYFSCurrentTabBarHeight; v.frame=f;
+    if (!DYFSIsEnabled() || gDYFSCurrentTabBarHeight<=0) return;
+
+    static char kDYFSConcernOriginalFramesKey;
+    NSArray *frames = objc_getAssociatedObject(self, &kDYFSConcernOriginalFramesKey);
+    if (!frames) {
+        NSMutableArray *saved = [NSMutableArray array];
+        for (UIView *v in self.subviews) {
+            [saved addObject:[NSValue valueWithCGRect:v.frame]];
+        }
+        frames = [saved copy];
+        objc_setAssociatedObject(self, &kDYFSConcernOriginalFramesKey, frames, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    NSUInteger count = MIN(frames.count, self.subviews.count);
+    for (NSUInteger i = 0; i < count; i++) {
+        UIView *v = self.subviews[i];
+        CGRect f = [frames[i] CGRectValue];
+        f.origin.y -= gDYFSCurrentTabBarHeight;
+        v.frame = f;
     }
 }
 %end
@@ -582,33 +604,15 @@ static BOOL DYFSShouldAdjustMetalView(UIView *view) {
 %hook AWECommentInputBackgroundView
 - (void)layoutSubviews {
     %orig;
+    if (!DYFSIsEnabled()) return;
+
+    if (DYFSIsAuthorProfileContext(self)) {
+        self.hidden = YES;
+        self.alpha = 0.0;
+        return;
+    }
+
     self.transform=CGAffineTransformMakeTranslation(0, gDYFSOriginalTabBarHeight-gDYFSCurrentTabBarHeight);
-}
-%end
-
-#pragma mark - Author profile bottom comment obstruction
-
-@interface AWECommentInputBackgroundView : UIView @end
-%hook AWECommentInputBackgroundView
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
-    if (DYFSIsAuthorProfileContext(self)) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-    }
-}
-%end
-
-@interface CommentInputContainerView : UIView @end
-%hook CommentInputContainerView
-- (void)layoutSubviews {
-    %orig;
-    if (!DYFSIsEnabled()) return;
-    if (DYFSIsAuthorProfileContext(self)) {
-        self.hidden = YES;
-        self.alpha = 0.0;
-    }
 }
 %end
 
