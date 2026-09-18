@@ -280,6 +280,8 @@ static void DYFSRestoreFeedTables(void) {
 }
 %end
 
+@interface AWEStoryContainerCollectionView : UIView
+@end
 #pragma mark - Author profile / image works
 
 %hook AWEStoryContainerCollectionView
@@ -854,8 +856,6 @@ static void DYFSApplyBackdrop(id owner, UIView *anchor, UIColor *color) {
 @interface AWEKnowledgeGradientView : UIView
 @end
 
-@interface AWEStoryContainerCollectionView : UIView
-@end
 
 static char kDYFSRichClipKey;
 static char kDYFSKnowledgeTransformKey;
